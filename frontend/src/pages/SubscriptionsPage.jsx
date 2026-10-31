@@ -14,7 +14,7 @@ import SubscriptionDetailModal from "./subscriptions/SubscriptionDetailModal";
 
 const STATUS_FILTERS = ["all", "draft", "active", "paused", "cancelled", "expired"];
 
-export function SubscriptionsPage() {
+export function SubscriptionsPage({ onNavigate }) {
   const { isAdmin, isStaff } = useAuth();
   const isAdminOrStaff = isAdmin || isStaff;
 
@@ -62,7 +62,9 @@ export function SubscriptionsPage() {
         <div>
           <h2 className="text-xl font-bold tracking-tight text-white">Subscriptions</h2>
           <p className="text-xs text-slate-400 mt-0.5">
-            Monitor recurring contracts, renewals, and billing schedules
+            {isAdminOrStaff
+              ? "Monitor recurring contracts, renewals, and billing schedules"
+              : "Review your active recurring plans, renewals, and agreements"}
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -109,11 +111,13 @@ export function SubscriptionsPage() {
           description={
             statusFilter !== "all"
               ? `No subscriptions with status "${statusFilter}".`
-              : "Subscriptions created from quotations or manually will appear here."
+              : isAdminOrStaff
+              ? "Subscriptions created from quotations or manually will appear here."
+              : "You do not have any active subscriptions yet. Browse our plans to subscribe."
           }
           icon={Repeat}
-          actionText={isAdminOrStaff ? "Create Subscription" : undefined}
-          onAction={isAdminOrStaff ? () => setShowCreate(true) : undefined}
+          actionText={isAdminOrStaff ? "Create Subscription" : onNavigate ? "Browse Plans" : undefined}
+          onAction={isAdminOrStaff ? () => setShowCreate(true) : onNavigate ? () => onNavigate("/plans") : undefined}
         />
       ) : (
         <>
@@ -121,7 +125,7 @@ export function SubscriptionsPage() {
             <TableHeader>
               <TableRow>
                 <TableHead>Subscription #</TableHead>
-                <TableHead>Customer</TableHead>
+                {isAdminOrStaff && <TableHead>Customer</TableHead>}
                 <TableHead>Plan</TableHead>
                 <TableHead>Start Date</TableHead>
                 <TableHead>Next Billing</TableHead>
@@ -139,7 +143,9 @@ export function SubscriptionsPage() {
                   <TableCell className="font-mono text-xs font-semibold text-brand-400">
                     {sub.subscription_number}
                   </TableCell>
-                  <TableCell className="font-medium text-white">{sub.customer_name || "—"}</TableCell>
+                  {isAdminOrStaff && (
+                    <TableCell className="font-medium text-white">{sub.customer_name || "—"}</TableCell>
+                  )}
                   <TableCell className="text-xs text-slate-300">{sub.plan_name || "Custom"}</TableCell>
                   <TableCell className="text-xs text-slate-400">{formatDate(sub.start_date)}</TableCell>
                   <TableCell className="text-xs text-slate-300 font-medium">

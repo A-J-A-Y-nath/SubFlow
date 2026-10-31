@@ -24,7 +24,7 @@ import { formatCurrency, formatDate } from "../lib/utils";
 import { useAuth } from "../hooks/useAuth";
 
 export function PaymentsPage() {
-  const { user } = useAuth();
+  const { user, isCustomer } = useAuth();
   const isStaffOrAdmin = user?.role === "admin" || user?.role === "staff";
 
   // Data state
@@ -239,22 +239,32 @@ export function PaymentsPage() {
       {/* Top Summary KPI Strip */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <div className="p-4 rounded-xl bg-slate-900/60 border border-slate-800">
-          <span className="text-[11px] font-medium text-slate-400 uppercase tracking-wider">Total Recorded Receipts</span>
+          <span className="text-[11px] font-medium text-slate-400 uppercase tracking-wider">
+            {isCustomer ? "My Total Payments" : "Total Recorded Receipts"}
+          </span>
           <p className="text-xl font-bold text-emerald-400 mt-1">{formatCurrency(paymentStats.totalRevenue)}</p>
-          <span className="text-[10px] text-slate-500">From {paymentStats.completedCount} completed receipts</span>
+          <span className="text-[10px] text-slate-500">
+            {isCustomer ? "Settled payments" : `From ${paymentStats.completedCount} completed receipts`}
+          </span>
         </div>
         <div className="p-4 rounded-xl bg-slate-900/60 border border-slate-800">
-          <span className="text-[11px] font-medium text-slate-400 uppercase tracking-wider">Completed Transactions</span>
+          <span className="text-[11px] font-medium text-slate-400 uppercase tracking-wider">
+            {isCustomer ? "Settled Payments" : "Completed Transactions"}
+          </span>
           <p className="text-xl font-bold text-white mt-1">{paymentStats.completedCount}</p>
           <span className="text-[10px] text-slate-500">Fully settled payments</span>
         </div>
         <div className="p-4 rounded-xl bg-slate-900/60 border border-slate-800">
-          <span className="text-[11px] font-medium text-slate-400 uppercase tracking-wider">Pending Processing</span>
+          <span className="text-[11px] font-medium text-slate-400 uppercase tracking-wider">
+            {isCustomer ? "Pending Settlements" : "Pending Processing"}
+          </span>
           <p className="text-xl font-bold text-amber-400 mt-1">{paymentStats.pendingCount}</p>
           <span className="text-[10px] text-slate-500">Awaiting gateway settlement</span>
         </div>
         <div className="p-4 rounded-xl bg-slate-900/60 border border-slate-800">
-          <span className="text-[11px] font-medium text-slate-400 uppercase tracking-wider">Avg Receipt Size</span>
+          <span className="text-[11px] font-medium text-slate-400 uppercase tracking-wider">
+            {isCustomer ? "Avg Payment Size" : "Avg Receipt Size"}
+          </span>
           <p className="text-xl font-bold text-brand-400 mt-1">
             {formatCurrency(paymentStats.completedCount > 0 ? paymentStats.totalRevenue / paymentStats.completedCount : 0)}
           </p>
@@ -265,9 +275,13 @@ export function PaymentsPage() {
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h2 className="text-xl font-bold tracking-tight text-white">Payment Transactions</h2>
+          <h2 className="text-xl font-bold tracking-tight text-white">
+            {isCustomer ? "My Payment Receipts" : "Payment Transactions"}
+          </h2>
           <p className="text-xs text-slate-400 mt-0.5">
-            Gateway transaction logs, reconciliation records, and balance allocations
+            {isCustomer
+              ? "Review settled payments, transaction receipts, and invoice balance allocations"
+              : "Gateway transaction logs, reconciliation records, and balance allocations"}
           </p>
         </div>
 
@@ -349,7 +363,11 @@ export function PaymentsPage() {
       ) : payments.length === 0 ? (
         <EmptyState
           title="No Payment Transactions Logged"
-          description="Customer payment transactions processed via credit card, bank transfer, or cash will be recorded here."
+          description={
+            isCustomer
+              ? "No payment transactions have been recorded on your account yet."
+              : "Customer payment transactions processed via credit card, bank transfer, or cash will be recorded here."
+          }
           icon={CreditCard}
           actionText={isStaffOrAdmin ? "Record New Payment" : undefined}
           onAction={isStaffOrAdmin ? openRecordModal : undefined}
@@ -359,7 +377,7 @@ export function PaymentsPage() {
           <TableHeader>
             <TableRow>
               <TableHead>Payment #</TableHead>
-              <TableHead>Customer</TableHead>
+              {isStaffOrAdmin && <TableHead>Customer</TableHead>}
               <TableHead>Target Invoice</TableHead>
               <TableHead>Method</TableHead>
               <TableHead>Transaction Ref</TableHead>
@@ -375,7 +393,9 @@ export function PaymentsPage() {
                 <TableCell className="font-mono text-xs font-semibold text-brand-400">
                   {pay.payment_number}
                 </TableCell>
-                <TableCell className="font-medium text-white">{pay.customer_name || "Client"}</TableCell>
+                {isStaffOrAdmin && (
+                  <TableCell className="font-medium text-white">{pay.customer_name || "Client"}</TableCell>
+                )}
                 <TableCell className="font-mono text-xs text-slate-400">
                   {pay.invoice_number || "Unlinked / Direct"}
                 </TableCell>

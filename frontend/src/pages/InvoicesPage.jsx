@@ -84,9 +84,13 @@ export function InvoicesPage() {
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h2 className="text-xl font-bold tracking-tight text-white">Invoices & Receivables</h2>
+          <h2 className="text-xl font-bold tracking-tight text-white">
+            {isAdminOrStaff ? "Invoices & Receivables" : "My Invoices & Statements"}
+          </h2>
           <p className="text-xs text-slate-400 mt-0.5">
-            Recurring billing statements, payment tracking, and outstanding balances
+            {isAdminOrStaff
+              ? "Recurring billing statements, payment tracking, and outstanding balances"
+              : "Review your statement history, payment statuses, and invoice receipts"}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -143,7 +147,9 @@ export function InvoicesPage() {
           title="No Invoices Found"
           description={statusFilter !== "all"
             ? `No "${statusFilter}" invoices found.`
-            : "Invoices are generated from subscription billing cycles or manually created."}
+            : isAdminOrStaff
+            ? "Invoices are generated from subscription billing cycles or manually created."
+            : "No billing invoices or payment receipts have been issued to your account yet."}
           icon={Receipt}
           actionText={isAdminOrStaff ? "Issue Invoice" : undefined}
           onAction={isAdminOrStaff ? () => setShowCreate(true) : undefined}
@@ -154,7 +160,7 @@ export function InvoicesPage() {
             <TableHeader>
               <TableRow>
                 <TableHead>Invoice #</TableHead>
-                <TableHead>Customer</TableHead>
+                {isAdminOrStaff && <TableHead>Customer</TableHead>}
                 <TableHead>Issue Date</TableHead>
                 <TableHead>Due Date</TableHead>
                 <TableHead>Total</TableHead>
@@ -173,7 +179,9 @@ export function InvoicesPage() {
                     <TableCell className="font-mono text-xs font-semibold text-brand-400">
                       {inv.invoice_number}
                     </TableCell>
-                    <TableCell className="font-medium text-white">{inv.customer_name || "—"}</TableCell>
+                    {isAdminOrStaff && (
+                      <TableCell className="font-medium text-white">{inv.customer_name || "—"}</TableCell>
+                    )}
                     <TableCell className="text-xs text-slate-400">{formatDate(inv.invoice_date)}</TableCell>
                     <TableCell className={`text-xs font-medium ${isOverdue ? "text-rose-400" : "text-slate-300"}`}>
                       {formatDate(inv.due_date)}

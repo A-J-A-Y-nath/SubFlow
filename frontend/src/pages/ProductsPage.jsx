@@ -507,18 +507,20 @@ export function ProductsPage() {
                         >
                           {prod.is_active ? <XCircle className="w-3.5 h-3.5" /> : <CheckCircle2 className="w-3.5 h-3.5" />}
                         </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => {
-                            setDeleteTarget({ type: "product", data: prod });
-                            setIsDeleteModalOpen(true);
-                          }}
-                          title="Delete Product"
-                          className="hover:text-rose-400"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </Button>
+                        {isAdmin && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => {
+                              setDeleteTarget({ type: "product", data: prod });
+                              setIsDeleteModalOpen(true);
+                            }}
+                            title="Delete Product"
+                            className="hover:text-rose-400"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </Button>
+                        )}
                       </div>
                     </TableCell>
                   )}
@@ -847,18 +849,20 @@ export function ProductsPage() {
                             >
                               {variant.is_active ? <XCircle className="w-3.5 h-3.5" /> : <CheckCircle2 className="w-3.5 h-3.5" />}
                             </Button>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => {
-                                setDeleteTarget({ type: "variant", data: variant });
-                                setIsDeleteModalOpen(true);
-                              }}
-                              title="Delete Variant"
-                              className="hover:text-rose-400"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </Button>
+                            {isAdmin && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => {
+                                  setDeleteTarget({ type: "variant", data: variant });
+                                  setIsDeleteModalOpen(true);
+                                }}
+                                title="Delete Variant"
+                                className="hover:text-rose-400"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </Button>
+                            )}
                           </div>
                         </TableCell>
                       )}

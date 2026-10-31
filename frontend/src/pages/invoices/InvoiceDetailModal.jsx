@@ -162,24 +162,28 @@ export function InvoiceDetailModal({ isOpen, onClose, invoice, isAdminOrStaff, o
         )}
 
         {/* Actions */}
-        {isAdminOrStaff && (
-          <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-slate-800">
-            <span className="text-xs text-slate-500 mr-1">Actions:</span>
-            {canConfirm && (
-              <Button variant="primary" size="sm" onClick={() => handleAction("confirm")} isLoading={isLoading}>
-                <CheckCircle className="w-3.5 h-3.5 mr-1.5" /> Confirm & Post
-              </Button>
+        <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-800">
+          <div className="flex flex-wrap items-center gap-2">
+            {isAdminOrStaff && (
+              <>
+                <span className="text-xs text-slate-500 mr-1">Staff Actions:</span>
+                {canConfirm && (
+                  <Button variant="primary" size="sm" onClick={() => handleAction("confirm")} isLoading={isLoading}>
+                    <CheckCircle className="w-3.5 h-3.5 mr-1.5" /> Confirm & Post
+                  </Button>
+                )}
+                {canCancel && (
+                  <Button variant="danger" size="sm" onClick={() => handleAction("cancel")} isLoading={isLoading}>
+                    <XCircle className="w-3.5 h-3.5 mr-1.5" /> Cancel Invoice
+                  </Button>
+                )}
+              </>
             )}
-            {canCancel && (
-              <Button variant="danger" size="sm" onClick={() => handleAction("cancel")} isLoading={isLoading}>
-                <XCircle className="w-3.5 h-3.5 mr-1.5" /> Cancel Invoice
-              </Button>
-            )}
-            <Button variant="outline" size="sm" onClick={handlePrint}>
-              <Printer className="w-3.5 h-3.5 mr-1.5" /> Print
-            </Button>
           </div>
-        )}
+          <Button variant="outline" size="sm" onClick={handlePrint}>
+            <Printer className="w-3.5 h-3.5 mr-1.5" /> Print Invoice
+          </Button>
+        </div>
       </div>
     </Modal>
   );

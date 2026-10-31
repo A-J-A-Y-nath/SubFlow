@@ -16,19 +16,18 @@ import {
 import { useAuth } from "../../hooks/useAuth";
 import { Badge } from "../ui/Badge";
 import { cn } from "../../lib/utils";
-
 export function Sidebar({ currentPath, onNavigate, isMobileOpen, onCloseMobile, onOpenCreateStaff }) {
-  const { user, role, isAdmin } = useAuth();
+  const { user, role, isAdmin, isCustomer } = useAuth();
 
   const navItems = [
     { label: "Dashboard", path: "/dashboard", icon: LayoutDashboard, roles: ["admin", "staff", "customer"] },
-    { label: "Products", path: "/products", icon: Package, roles: ["admin", "staff", "customer"] },
     { label: "Plans", path: "/plans", icon: Layers, roles: ["admin", "staff", "customer"] },
     { label: "Subscriptions", path: "/subscriptions", icon: Repeat, roles: ["admin", "staff", "customer"] },
-    { label: "Quotations", path: "/quotations", icon: FileText, roles: ["admin", "staff", "customer"] },
     { label: "Invoices", path: "/invoices", icon: Receipt, roles: ["admin", "staff", "customer"] },
     { label: "Payments", path: "/payments", icon: CreditCard, roles: ["admin", "staff", "customer"] },
-    { label: "Discounts", path: "/discounts", icon: Percent, roles: ["admin", "staff", "customer"] },
+    { label: "Products", path: "/products", icon: Package, roles: ["admin", "staff"] },
+    { label: "Quotations", path: "/quotations", icon: FileText, roles: ["admin", "staff"] },
+    { label: "Discounts", path: "/discounts", icon: Percent, roles: ["admin", "staff"] },
     { label: "Reports", path: "/reports", icon: BarChart3, roles: ["admin", "staff"] },
   ];
 
@@ -97,7 +96,7 @@ export function Sidebar({ currentPath, onNavigate, isMobileOpen, onCloseMobile, 
         {/* Navigation items */}
         <nav className="flex-1 space-y-1 px-3 py-2 overflow-y-auto">
           <div className="px-3 pb-1 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
-            Platform Modules
+            {isCustomer ? "Customer Portal" : "Platform Modules"}
           </div>
 
           {visibleNavItems.map((item) => {

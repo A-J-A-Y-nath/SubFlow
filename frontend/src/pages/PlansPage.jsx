@@ -480,18 +480,20 @@ export function PlansPage() {
                         </Button>
                       </div>
 
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => {
-                          setDeletingPlan(plan);
-                          setIsDeleteModalOpen(true);
-                        }}
-                        title="Delete Plan"
-                        className="hover:text-rose-400"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </Button>
+                      {isAdmin && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => {
+                            setDeletingPlan(plan);
+                            setIsDeleteModalOpen(true);
+                          }}
+                          title="Delete Plan"
+                          className="hover:text-rose-400"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </Button>
+                      )}
                     </div>
                   ) : (
                     <Button

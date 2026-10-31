@@ -25,7 +25,7 @@ import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from ".
 import { formatCurrency, formatDate } from "../lib/utils";
 
 export function Dashboard({ onNavigate }) {
-  const { user, isAdmin } = useAuth();
+  const { user, isAdmin, isCustomer } = useAuth();
   const [summary, setSummary] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -74,32 +74,59 @@ export function Dashboard({ onNavigate }) {
         <div>
           <div className="flex items-center gap-2">
             <h2 className="text-xl font-bold text-white tracking-tight">
-              Welcome back, {user?.first_name || "Team"}
+              Welcome back, {user?.first_name || (isCustomer ? "Subscriber" : "Team")}
             </h2>
-            <Badge variant="brand" className="text-[10px]">Make-A-Ton 9.0</Badge>
+            <Badge variant="brand" className="text-[10px]">
+              {isCustomer ? "Customer Portal" : "Make-A-Ton 9.0"}
+            </Badge>
           </div>
           <p className="text-xs text-slate-400 mt-1 max-w-xl">
-            SubFlow Core Platform Foundation is active with PostgreSQL on Neon, JWT RBAC, and modular API contracts.
+            {isCustomer
+              ? "Manage your active subscription agreements, view statements, and browse upgrade tiers."
+              : "SubFlow Core Platform Foundation is active with PostgreSQL on Neon, JWT RBAC, and modular API contracts."}
           </p>
         </div>
 
         <div className="flex items-center gap-2.5 shrink-0">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => onNavigate("/products")}
-          >
-            <Package className="w-4 h-4 mr-1.5 text-brand-400" />
-            Catalog
-          </Button>
-          <Button
-            variant="primary"
-            size="sm"
-            onClick={() => onNavigate("/plans")}
-          >
-            <Layers className="w-4 h-4 mr-1.5" />
-            Subscription Plans
-          </Button>
+          {!isCustomer ? (
+            <>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => onNavigate("/products")}
+              >
+                <Package className="w-4 h-4 mr-1.5 text-brand-400" />
+                Catalog
+              </Button>
+              <Button
+                variant="primary"
+                size="sm"
+                onClick={() => onNavigate("/plans")}
+              >
+                <Layers className="w-4 h-4 mr-1.5" />
+                Subscription Plans
+              </Button>
+            </>
+          ) : (
+            <>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => onNavigate("/invoices")}
+              >
+                <Receipt className="w-4 h-4 mr-1.5 text-brand-400" />
+                My Invoices
+              </Button>
+              <Button
+                variant="primary"
+                size="sm"
+                onClick={() => onNavigate("/plans")}
+              >
+                <Layers className="w-4 h-4 mr-1.5" />
+                Browse Plans
+              </Button>
+            </>
+          )}
         </div>
       </div>
 
@@ -108,26 +135,26 @@ export function Dashboard({ onNavigate }) {
       {/* KPI Stat Cards Grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard
-          title="Active Subscriptions"
+          title={isCustomer ? "My Subscriptions" : "Active Subscriptions"}
           value={activeSubs.count}
           icon={Repeat}
-          subtext={`of ${activeSubs.total} total subscriptions`}
-          badgeText={activeSubs.count > 0 ? "Operational" : "Awaiting Data"}
+          subtext={isCustomer ? "Active recurring agreements" : `of ${activeSubs.total} total subscriptions`}
+          badgeText={activeSubs.count > 0 ? (isCustomer ? "Active" : "Operational") : "None Active"}
           accentColor="text-brand-400 bg-brand-500/10 border-brand-500/20"
         />
 
         <StatCard
-          title="Total Revenue"
+          title={isCustomer ? "Total Paid" : "Total Revenue"}
           value={totalRev.amount}
           isCurrency={true}
           currency={totalRev.currency}
           icon={DollarSign}
-          subtext="Settled across all payments"
+          subtext={isCustomer ? "Settled across your invoices" : "Settled across all payments"}
           accentColor="text-emerald-400 bg-emerald-500/10 border-emerald-500/20"
         />
 
         <StatCard
-          title="Outstanding Invoices"
+          title={isCustomer ? "Unpaid Invoices" : "Outstanding Invoices"}
           value={outstandingInv.amount}
           isCurrency={true}
           currency={outstandingInv.currency}
@@ -153,10 +180,14 @@ export function Dashboard({ onNavigate }) {
       {isEmpty ? (
         <Card className="border-dashed border-slate-800 bg-slate-900/40">
           <EmptyState
-            title="Database Ready — Business Modules Standby"
-            description="The core platform, authentication, database migrations, and models are fully configured on Neon PostgreSQL. As your teammates implement quotations, subscriptions, and billing workflows, metrics will automatically populate here."
-            developerNote="Shared contracts at docs/api-contracts.md. Seeded accounts & default plans are ready to be utilized."
-            actionText="Browse Seeded Subscription Plans"
+            title={isCustomer ? "No Subscriptions Yet" : "Database Ready — Business Modules Standby"}
+            description={
+              isCustomer
+                ? "You do not have any active subscriptions or billing statements yet. Explore our subscription plans to find the right tier for you."
+                : "The core platform, authentication, database migrations, and models are fully configured on Neon PostgreSQL. As your teammates implement quotations, subscriptions, and billing workflows, metrics will automatically populate here."
+            }
+            developerNote={isCustomer ? null : "Shared contracts at docs/api-contracts.md. Seeded accounts & default plans are ready to be utilized."}
+            actionText={isCustomer ? "Browse Subscription Plans" : "Browse Seeded Subscription Plans"}
             onAction={() => onNavigate("/plans")}
           />
         </Card>
@@ -187,7 +218,11 @@ export function Dashboard({ onNavigate }) {
                   <TableHeader>
                     <TableRow>
                       <TableHead>Invoice #</TableHead>
-                      <TableHead>Customer</TableHead>
+                      {!isCustomer ? (
+                        <TableHead>Customer</TableHead>
+                      ) : (
+                        <TableHead>Due Date</TableHead>
+                      )}
                       <TableHead>Amount</TableHead>
                       <TableHead>Status</TableHead>
                     </TableRow>
@@ -198,7 +233,11 @@ export function Dashboard({ onNavigate }) {
                         <TableCell className="font-mono text-xs font-semibold text-brand-400">
                           {inv.invoice_number}
                         </TableCell>
-                        <TableCell className="text-xs">{inv.customer_name || "Client"}</TableCell>
+                        {!isCustomer ? (
+                          <TableCell className="text-xs">{inv.customer_name || "Client"}</TableCell>
+                        ) : (
+                          <TableCell className="text-xs text-slate-300">{formatDate(inv.due_date)}</TableCell>
+                        )}
                         <TableCell className="text-xs font-medium">
                           {formatCurrency(inv.total_amount, inv.currency)}
                         </TableCell>
@@ -265,33 +304,35 @@ export function Dashboard({ onNavigate }) {
         </div>
       )}
 
-      {/* Developer Collaboration Hub Banner */}
-      <Card className="border-brand-500/20 bg-gradient-to-r from-brand-950/40 via-slate-900/60 to-slate-900/80">
-        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <div className="p-3 rounded-xl bg-brand-500/10 border border-brand-500/20 text-brand-400">
-              <Sparkles className="w-5 h-5" />
+      {/* Developer Collaboration Hub Banner — internal team only */}
+      {!isCustomer && (
+        <Card className="border-brand-500/20 bg-gradient-to-r from-brand-950/40 via-slate-900/60 to-slate-900/80">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <div className="p-3 rounded-xl bg-brand-500/10 border border-brand-500/20 text-brand-400">
+                <Sparkles className="w-5 h-5" />
+              </div>
+              <div>
+                <h4 className="text-sm font-semibold text-white">
+                  Team Collaboration Blueprint (Make-A-Ton 9.0)
+                </h4>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  The database schema, ORM relationships, API conventions, and tests are verified and ready for teammates to drop in features.
+                </p>
+              </div>
             </div>
-            <div>
-              <h4 className="text-sm font-semibold text-white">
-                Team Collaboration Blueprint (Make-A-Ton 9.0)
-              </h4>
-              <p className="text-xs text-slate-400 mt-0.5">
-                The database schema, ORM relationships, API conventions, and tests are verified and ready for teammates to drop in features.
-              </p>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => onNavigate("/reports")}
+              >
+                Analytics Preview
+              </Button>
             </div>
           </div>
-          <div className="flex items-center gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => onNavigate("/reports")}
-            >
-              Analytics Preview
-            </Button>
-          </div>
-        </div>
-      </Card>
+        </Card>
+      )}
     </div>
   );
 }

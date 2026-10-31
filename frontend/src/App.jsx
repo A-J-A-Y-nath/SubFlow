@@ -15,11 +15,14 @@ import ReportsPage from "./pages/ReportsPage";
 import LoadingSpinner from "./components/common/LoadingSpinner";
 
 function MainApp() {
-  const { isAuthenticated, loading } = useAuth();
+  const { isAuthenticated, loading, isCustomer } = useAuth();
   const [currentPath, setCurrentPath] = useState(() => {
     const path = window.location.pathname;
     return path && path !== "/" ? path : "/dashboard";
   });
+
+  // Role-based route guard: Customer cannot access internal management modules
+  const staffOrAdminRoutes = ["/products", "/quotations", "/discounts", "/reports"];
 
   // Listen to browser forward/back buttons
   useEffect(() => {
@@ -31,7 +34,17 @@ function MainApp() {
     return () => window.removeEventListener("popstate", handlePopState);
   }, []);
 
+  // Guard customer navigation if attempted directly
+  useEffect(() => {
+    if (isCustomer && staffOrAdminRoutes.includes(currentPath)) {
+      navigate("/dashboard");
+    }
+  }, [isCustomer, currentPath]);
+
   const navigate = (path) => {
+    if (isCustomer && staffOrAdminRoutes.includes(path)) {
+      path = "/dashboard";
+    }
     setCurrentPath(path);
     window.history.pushState({}, "", path);
   };
@@ -53,37 +66,45 @@ function MainApp() {
   }
 
   // Page titles mapping
-  const titles = {
-    "/dashboard": "System Overview",
-    "/products": "Product Catalog",
-    "/plans": "Subscription Plans",
-    "/subscriptions": "Active Subscriptions",
-    "/quotations": "Quotations & Proposals",
-    "/invoices": "Invoicing & Accounts",
-    "/payments": "Payment Receipts",
-    "/discounts": "Discount & Promo Rules",
-    "/reports": "Analytics & Performance",
-  };
+  const titles = isCustomer
+    ? {
+        "/dashboard": "My Overview",
+        "/plans": "Subscription Plans",
+        "/subscriptions": "My Subscriptions",
+        "/invoices": "My Invoices & Statements",
+        "/payments": "My Payment Receipts",
+      }
+    : {
+        "/dashboard": "System Overview",
+        "/products": "Product Catalog",
+        "/plans": "Subscription Plans",
+        "/subscriptions": "Active Subscriptions",
+        "/quotations": "Quotations & Proposals",
+        "/invoices": "Invoicing & Accounts",
+        "/payments": "Payment Receipts",
+        "/discounts": "Discount & Promo Rules",
+        "/reports": "Analytics & Performance",
+      };
 
-  // Render authenticated page
+  // Render authenticated page with strict customer guards
   const renderPage = () => {
     switch (currentPath) {
       case "/products":
-        return <ProductsPage />;
+        return isCustomer ? <Dashboard onNavigate={navigate} /> : <ProductsPage />;
       case "/plans":
         return <PlansPage />;
       case "/subscriptions":
-        return <SubscriptionsPage />;
+        return <SubscriptionsPage onNavigate={navigate} />;
       case "/quotations":
-        return <QuotationsPage />;
+        return isCustomer ? <Dashboard onNavigate={navigate} /> : <QuotationsPage />;
       case "/invoices":
         return <InvoicesPage />;
       case "/payments":
         return <PaymentsPage />;
       case "/discounts":
-        return <DiscountsPage />;
+        return isCustomer ? <Dashboard onNavigate={navigate} /> : <DiscountsPage />;
       case "/reports":
-        return <ReportsPage />;
+        return isCustomer ? <Dashboard onNavigate={navigate} /> : <ReportsPage />;
       case "/dashboard":
       default:
         return <Dashboard onNavigate={navigate} />;
