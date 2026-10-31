@@ -65,3 +65,6 @@ pnpm-debug.log*
 .DS_Store
 Thumbs.db
 *.log
+
+# Whitelist frontend utils
+!frontend/src/lib/

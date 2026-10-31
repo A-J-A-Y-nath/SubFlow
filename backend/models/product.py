@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+from decimal import Decimal
 from backend.extensions import db
 
 
@@ -52,7 +53,7 @@ class Product(db.Model):
 
 class ProductVariant(db.Model):
     """
-    Product variant model for attributes such as tier, tier capacity, region, or seats.
+    Product variant model for configurable options, additional pricing, and dimensions.
     """
     __tablename__ = "product_variants"
 
@@ -60,7 +61,7 @@ class ProductVariant(db.Model):
     product_id = db.Column(db.Integer, db.ForeignKey("products.id", ondelete="CASCADE"), nullable=False, index=True)
     sku = db.Column(db.String(100), unique=True, nullable=False, index=True)
     name = db.Column(db.String(255), nullable=False)
-    attributes = db.Column(db.JSON, default=dict, nullable=False)  # e.g. {"storage": "100GB", "tier": "pro"}
+    attributes = db.Column(db.JSON, default=dict, nullable=False)  # e.g. {"description": "...", "tier": "pro"}
     price_extra = db.Column(db.Numeric(12, 2), default=0.00, nullable=False)
     is_active = db.Column(db.Boolean, default=True, nullable=False)
 
@@ -70,13 +71,28 @@ class ProductVariant(db.Model):
     product = db.relationship("Product", back_populates="variants")
 
     def to_dict(self) -> dict:
+        base_price_val = self.product.default_price if (self.product and self.product.default_price is not None) else 0.00
+        price_extra_val = self.price_extra if self.price_extra is not None else 0.00
+        base_dec = Decimal(str(base_price_val))
+        extra_dec = Decimal(str(price_extra_val))
+        final_dec = base_dec + extra_dec
+
+        desc = ""
+        if isinstance(self.attributes, dict):
+            desc = self.attributes.get("description", "")
+
         return {
             "id": self.id,
             "product_id": self.product_id,
+            "product_name": self.product.name if self.product else None,
             "sku": self.sku,
             "name": self.name,
-            "attributes": self.attributes,
-            "price_extra": float(self.price_extra) if self.price_extra is not None else 0.0,
+            "description": desc,
+            "attributes": self.attributes or {},
+            "base_price": float(base_dec),
+            "price_extra": float(extra_dec),
+            "final_price": float(final_dec),
+            "currency": self.product.currency if self.product else "USD",
             "is_active": self.is_active,
             "created_at": self.created_at.isoformat() if self.created_at else None,
         }

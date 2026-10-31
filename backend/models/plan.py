@@ -12,19 +12,19 @@ class Plan(db.Model):
     name = db.Column(db.String(255), nullable=False)
     code = db.Column(db.String(100), unique=True, nullable=False, index=True)
     description = db.Column(db.Text, nullable=True)
-    
+
     # Billing cadence
-    billing_interval = db.Column(db.String(50), default="monthly", nullable=False)  # 'monthly', 'quarterly', 'yearly'
+    billing_interval = db.Column(db.String(50), default="monthly", nullable=False)  # 'daily', 'weekly', 'monthly', 'quarterly', 'yearly'
     billing_interval_count = db.Column(db.Integer, default=1, nullable=False)
-    
+
     # Financials
     base_price = db.Column(db.Numeric(12, 2), default=0.00, nullable=False)
     setup_fee = db.Column(db.Numeric(12, 2), default=0.00, nullable=False)
     currency = db.Column(db.String(10), default="USD", nullable=False)
-    
+
     # Features & Policies
     trial_days = db.Column(db.Integer, default=0, nullable=False)
-    features = db.Column(db.JSON, default=list, nullable=False)  # list of feature string bullet points
+    features = db.Column(db.JSON, default=list, nullable=False)  # list of strings or dict with meta
     is_active = db.Column(db.Boolean, default=True, nullable=False)
 
     created_at = db.Column(db.DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
@@ -40,6 +40,14 @@ class Plan(db.Model):
     quotations = db.relationship("Quotation", back_populates="plan")
 
     def to_dict(self) -> dict:
+        features_list = []
+        meta = {}
+        if isinstance(self.features, list):
+            features_list = self.features
+        elif isinstance(self.features, dict):
+            features_list = self.features.get("bullets", [])
+            meta = self.features
+
         return {
             "id": self.id,
             "name": self.name,
@@ -51,7 +59,11 @@ class Plan(db.Model):
             "setup_fee": float(self.setup_fee) if self.setup_fee is not None else 0.0,
             "currency": self.currency,
             "trial_days": self.trial_days,
-            "features": self.features or [],
+            "features": features_list,
+            "min_quantity": meta.get("min_quantity", 1),
+            "available_from": meta.get("available_from", None),
+            "available_until": meta.get("available_until", None),
+            "auto_renew": meta.get("auto_renew", True),
             "is_active": self.is_active,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
