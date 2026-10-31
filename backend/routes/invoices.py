@@ -14,10 +14,12 @@ from backend.models.subscription import Subscription
 from backend.models.audit_log import AuditLog
 from backend.services.billing_service import BillingService
 from backend.services.analytics_service import AnalyticsService
-try:
-    from backend.services.invoice_service import mark_overdue_invoices
-except ImportError:
-    mark_overdue_invoices = None
+from backend.services.invoice_service import (
+    create_invoice_manual,
+    confirm_invoice,
+    cancel_invoice,
+    mark_overdue_invoices,
+)
 from backend.utils.response import api_response, api_error
 from backend.utils.pagination import paginate_query, get_pagination_params
 from backend.utils.decorators import role_required, ROLE_ADMIN, ROLE_STAFF, ROLE_CUSTOMER
@@ -141,53 +143,10 @@ def get_invoice(invoice_id: int):
 @role_required(ROLE_ADMIN, ROLE_STAFF)
 def create_invoice():
     data = request.get_json(silent=True) or {}
-    customer_id = data.get("customer_id")
-    if not customer_id:
-        return api_error(code="VALIDATION_ERROR", message="Customer ID is required", status_code=422)
-
-    lines = data.get("lines")
-    if not lines or not isinstance(lines, list) or len(lines) == 0:
-        return api_error(code="VALIDATION_ERROR", message="At least one invoice line item is required", status_code=422)
-
-    try:
-        inv_date = date.fromisoformat(data["invoice_date"]) if data.get("invoice_date") else date.today()
-    except (ValueError, TypeError):
-        return api_error(code="INVALID_DATE", message="Invalid invoice_date format (expected YYYY-MM-DD)", status_code=422)
-
-    try:
-        due_date = date.fromisoformat(data["due_date"]) if data.get("due_date") else inv_date + timedelta(days=30)
-    except (ValueError, TypeError):
-        return api_error(code="INVALID_DATE", message="Invalid due_date format (expected YYYY-MM-DD)", status_code=422)
-
-    tax_amount = Decimal(str(data.get("tax_amount", 0)))
-    status = (data.get("status") or "draft").lower()
-    if status not in ("draft", "posted"):
-        status = "draft"
-
-    try:
-        invoice = BillingService.create_invoice(
-            customer_id=int(customer_id),
-            invoice_date=inv_date,
-            due_date=due_date,
-            lines=lines,
-            subscription_id=data.get("subscription_id"),
-            quotation_id=data.get("quotation_id"),
-            coupon_code=data.get("coupon_code"),
-            tax_amount=tax_amount,
-            notes=data.get("notes"),
-            payment_terms=data.get("payment_terms") or "Net 30",
-            currency=data.get("currency") or "USD",
-            status=status,
-            user_id=g.current_user.id
-        )
-        db.session.commit()
-        return api_response(data=invoice.to_dict(), message="Invoice created successfully", status_code=201)
-    except ValueError as ve:
-        db.session.rollback()
-        return api_error(code="VALIDATION_ERROR", message=str(ve), status_code=422)
-    except Exception as e:
-        db.session.rollback()
-        return api_error(code="INTERNAL_SERVER_ERROR", message=str(e), status_code=500)
+    invoice, err = create_invoice_manual(data, g.current_user)
+    if err:
+        return err
+    return api_response(data=invoice.to_dict(), message="Invoice created successfully", status_code=201)
 
 
 @invoices_bp.route("/<int:invoice_id>/issue", methods=["POST"])
@@ -195,54 +154,20 @@ def create_invoice():
 @role_required(ROLE_ADMIN, ROLE_STAFF)
 def issue_invoice(invoice_id: int):
     invoice = Invoice.query.get_or_404(invoice_id)
-    if invoice.status != "draft":
-        return api_error(
-            code="INVALID_STATUS_TRANSITION",
-            message=f"Only draft invoices can be issued. Current status: '{invoice.status}'",
-            status_code=400
-        )
-
-    invoice.status = "posted"
-    audit = AuditLog(
-        user_id=g.current_user.id,
-        action="INVOICE_ISSUED",
-        entity_type="Invoice",
-        entity_id=str(invoice.id),
-        old_values={"status": "draft"},
-        new_values={"status": "posted", "invoice_number": invoice.invoice_number}
-    )
-    db.session.add(audit)
-    db.session.commit()
-    return api_response(data=invoice.to_dict(), message=f"Invoice {invoice.invoice_number} has been posted successfully")
+    invoice, err = confirm_invoice(invoice, g.current_user)
+    if err:
+        return err
+    return api_response(data=invoice.to_dict(), message="Invoice confirmed and posted")
 
 
 @invoices_bp.route("/<int:invoice_id>/cancel", methods=["POST"])
 @role_required(ROLE_ADMIN, ROLE_STAFF)
-def cancel_invoice(invoice_id: int):
+def cancel_invoice_route(invoice_id: int):
     invoice = Invoice.query.get_or_404(invoice_id)
-    if invoice.status == "cancelled":
-        return api_error(code="ALREADY_CANCELLED", message="Invoice is already cancelled", status_code=400)
-
-    if invoice.status == "paid" or (invoice.amount_paid and invoice.amount_paid > Decimal("0.00")):
-        return api_error(
-            code="CANNOT_CANCEL_PAID_INVOICE",
-            message="Cannot cancel an invoice with payments allocated to it. Refund payments first.",
-            status_code=400
-        )
-
-    old_status = invoice.status
-    invoice.status = "cancelled"
-    audit = AuditLog(
-        user_id=g.current_user.id,
-        action="INVOICE_CANCELLED",
-        entity_type="Invoice",
-        entity_id=str(invoice.id),
-        old_values={"status": old_status},
-        new_values={"status": "cancelled", "invoice_number": invoice.invoice_number}
-    )
-    db.session.add(audit)
-    db.session.commit()
-    return api_response(data=invoice.to_dict(), message=f"Invoice {invoice.invoice_number} has been cancelled")
+    invoice, err = cancel_invoice(invoice, g.current_user)
+    if err:
+        return err
+    return api_response(data=invoice.to_dict(), message="Invoice cancelled")
 
 
 @invoices_bp.route("/from-subscription/<int:subscription_id>", methods=["POST"])

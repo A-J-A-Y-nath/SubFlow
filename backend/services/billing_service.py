@@ -139,7 +139,8 @@ class BillingService:
                 "quantity": qty,
                 "unit_price": price,
                 "discount_percent": disc_pct,
-                "amount": line_total
+                "amount": line_total,
+                "line_total": line_total
             })
 
         coupon_discount = Decimal("0.00")
@@ -229,7 +230,7 @@ class BillingService:
                 quantity=line_item["quantity"],
                 unit_price=line_item["unit_price"],
                 discount_percent=line_item["discount_percent"],
-                amount=line_item["amount"]
+                line_total=line_item.get("line_total", line_item.get("amount", Decimal("0.00")))
             )
             invoice.lines.append(inv_line)
 
@@ -297,6 +298,15 @@ class BillingService:
                     "subscription_id": sub.id,
                     "subscription_number": sub.subscription_number,
                     "reason": f"Next billing date exceeds subscription end date {sub.end_date.isoformat()}"
+                })
+                continue
+
+            # If subscription is in trial and target date is within trial, skip
+            if sub.trial_end and target_date <= sub.trial_end:
+                results["skipped"].append({
+                    "subscription_id": sub.id,
+                    "subscription_number": sub.subscription_number,
+                    "reason": f"Subscription in trial period until {sub.trial_end.isoformat()}"
                 })
                 continue
 

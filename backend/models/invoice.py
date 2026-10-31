@@ -110,6 +110,19 @@ class InvoiceLine(db.Model):
     invoice = db.relationship("Invoice", back_populates="lines")
     product = db.relationship("Product", back_populates="invoice_lines")
 
+    def __init__(self, **kwargs):
+        if "amount" in kwargs and "line_total" not in kwargs:
+            kwargs["line_total"] = kwargs.pop("amount")
+        super().__init__(**kwargs)
+
+    @property
+    def amount(self):
+        return self.line_total
+
+    @amount.setter
+    def amount(self, val):
+        self.line_total = val
+
     def to_dict(self) -> dict:
         return {
             "id": self.id,
@@ -121,4 +134,5 @@ class InvoiceLine(db.Model):
             "unit_price": float(self.unit_price) if self.unit_price is not None else 0.0,
             "discount_percent": float(self.discount_percent) if self.discount_percent is not None else 0.0,
             "line_total": float(self.line_total) if self.line_total is not None else 0.0,
+            "amount": float(self.line_total) if self.line_total is not None else 0.0,
         }

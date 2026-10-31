@@ -24,6 +24,35 @@ class AuditLog(db.Model):
     # Relationships
     user = db.relationship("User", back_populates="audit_logs")
 
+    @classmethod
+    def log_event(
+        cls,
+        entity_type: str,
+        entity_id=None,
+        action: str = "ACTION",
+        actor_id=None,
+        details=None,
+        old_values=None,
+        new_values=None,
+        ip_address=None,
+        user_agent=None
+    ):
+        try:
+            entry = cls(
+                user_id=actor_id,
+                action=action,
+                entity_type=entity_type,
+                entity_id=str(entity_id) if entity_id is not None else None,
+                new_values=details if details is not None else new_values,
+                old_values=old_values,
+                ip_address=ip_address,
+                user_agent=user_agent
+            )
+            db.session.add(entry)
+            return entry
+        except Exception:
+            return None
+
     def to_dict(self) -> dict:
         return {
             "id": self.id,
