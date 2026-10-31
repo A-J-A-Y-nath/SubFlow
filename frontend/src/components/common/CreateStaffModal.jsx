@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { UserPlus, Mail, Lock, User, Check, X, Shield } from "lucide-react";
+import { UserPlus, Mail, Lock, User, Check, X, Shield, Eye, EyeOff } from "lucide-react";
 import { useAuth } from "../../hooks/useAuth";
 import Modal from "../ui/Modal";
 import Input from "../ui/Input";
@@ -14,6 +14,7 @@ export function CreateStaffModal({ isOpen, onClose, onSuccess }) {
     first_name: "",
     last_name: "",
   });
+  const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
   const [successMsg, setSuccessMsg] = useState(null);
@@ -99,12 +100,27 @@ export function CreateStaffModal({ isOpen, onClose, onSuccess }) {
         <div className="space-y-2">
           <Input
             label="Temporary Password"
-            type="password"
+            type={showPassword ? "text" : "password"}
             placeholder="••••••••••••"
             icon={Lock}
             value={formData.password}
             onChange={(e) => setFormData({ ...formData, password: e.target.value })}
             required
+            rightElement={
+              <button
+                type="button"
+                onClick={() => setShowPassword(!showPassword)}
+                className="text-slate-400 hover:text-slate-200 transition focus:outline-none p-1 rounded"
+                title={showPassword ? "Hide password" : "Show password"}
+                aria-label={showPassword ? "Hide password" : "Show password"}
+              >
+                {showPassword ? (
+                  <EyeOff className="w-4 h-4 text-slate-400 hover:text-slate-200" />
+                ) : (
+                  <Eye className="w-4 h-4 text-slate-400 hover:text-slate-200" />
+                )}
+              </button>
+            }
           />
 
           {/* Real-time Password Rules Checklist */}

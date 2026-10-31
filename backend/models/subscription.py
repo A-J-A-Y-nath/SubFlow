@@ -48,6 +48,14 @@ class Subscription(db.Model):
     lines = db.relationship("SubscriptionLine", back_populates="subscription", cascade="all, delete-orphan")
     invoices = db.relationship("Invoice", back_populates="subscription")
 
+    @property
+    def end_date(self):
+        return self.current_period_end
+
+    @end_date.setter
+    def end_date(self, val):
+        self.current_period_end = val
+
     def to_dict(self) -> dict:
         return {
             "id": self.id,
@@ -61,6 +69,7 @@ class Subscription(db.Model):
             "start_date": self.start_date.isoformat() if self.start_date else None,
             "current_period_start": self.current_period_start.isoformat() if self.current_period_start else None,
             "current_period_end": self.current_period_end.isoformat() if self.current_period_end else None,
+            "end_date": self.current_period_end.isoformat() if self.current_period_end else None,
             "trial_end": self.trial_end.isoformat() if self.trial_end else None,
             "next_billing_date": self.next_billing_date.isoformat() if self.next_billing_date else None,
             "auto_renew": self.auto_renew,

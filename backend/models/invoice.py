@@ -5,8 +5,17 @@ from backend.extensions import db
 class Invoice(db.Model):
     """
     Invoice model for tracking recurring and one-off customer billings and receivables.
+    billing_period_start + subscription_id form a unique key that prevents duplicate
+    invoices being generated for the same subscription billing period.
     """
     __tablename__ = "invoices"
+    __table_args__ = (
+        db.UniqueConstraint(
+            "subscription_id",
+            "billing_period_start",
+            name="uq_invoice_sub_period"
+        ),
+    )
 
     id = db.Column(db.Integer, primary_key=True)
     invoice_number = db.Column(db.String(100), unique=True, nullable=False, index=True)
@@ -29,6 +38,10 @@ class Invoice(db.Model):
     amount_paid = db.Column(db.Numeric(12, 2), default=0.00, nullable=False)
     balance_due = db.Column(db.Numeric(12, 2), default=0.00, nullable=False)
     
+    # Billing period this invoice covers (used for duplicate-billing prevention)
+    billing_period_start = db.Column(db.Date, nullable=True, index=True)
+    billing_period_end = db.Column(db.Date, nullable=True)
+
     notes = db.Column(db.Text, nullable=True)
     payment_terms = db.Column(db.String(100), default="Net 30", nullable=True)
 
@@ -55,10 +68,13 @@ class Invoice(db.Model):
             "customer_id": self.customer_id,
             "customer_name": self.customer.company_name if self.customer else None,
             "subscription_id": self.subscription_id,
+            "subscription_number": self.subscription.subscription_number if self.subscription else None,
             "quotation_id": self.quotation_id,
             "status": self.status,
             "invoice_date": self.invoice_date.isoformat() if self.invoice_date else None,
             "due_date": self.due_date.isoformat() if self.due_date else None,
+            "billing_period_start": self.billing_period_start.isoformat() if self.billing_period_start else None,
+            "billing_period_end": self.billing_period_end.isoformat() if self.billing_period_end else None,
             "currency": self.currency,
             "subtotal": float(self.subtotal) if self.subtotal is not None else 0.0,
             "discount_amount": float(self.discount_amount) if self.discount_amount is not None else 0.0,
@@ -94,6 +110,19 @@ class InvoiceLine(db.Model):
     invoice = db.relationship("Invoice", back_populates="lines")
     product = db.relationship("Product", back_populates="invoice_lines")
 
+    def __init__(self, **kwargs):
+        if "amount" in kwargs and "line_total" not in kwargs:
+            kwargs["line_total"] = kwargs.pop("amount")
+        super().__init__(**kwargs)
+
+    @property
+    def amount(self):
+        return self.line_total
+
+    @amount.setter
+    def amount(self, val):
+        self.line_total = val
+
     def to_dict(self) -> dict:
         return {
             "id": self.id,
@@ -105,4 +134,5 @@ class InvoiceLine(db.Model):
             "unit_price": float(self.unit_price) if self.unit_price is not None else 0.0,
             "discount_percent": float(self.discount_percent) if self.discount_percent is not None else 0.0,
             "line_total": float(self.line_total) if self.line_total is not None else 0.0,
+            "amount": float(self.line_total) if self.line_total is not None else 0.0,
         }

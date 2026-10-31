@@ -1,5 +1,6 @@
-import React, { useState, useEffect } from "react";
-import { FileText, Plus, Search } from "lucide-react";
+import React, { useState, useEffect, useCallback } from "react";
+import { FileText, Plus, RefreshCw } from "lucide-react";
+import { useAuth } from "../hooks/useAuth";
 import subflowService from "../services/subflowService";
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "../components/ui/Table";
 import Badge from "../components/ui/Badge";
@@ -8,34 +9,64 @@ import EmptyState from "../components/common/EmptyState";
 import LoadingSpinner from "../components/common/LoadingSpinner";
 import Alert from "../components/common/Alert";
 import { formatCurrency, formatDate } from "../lib/utils";
+import CreateQuotationModal from "./quotations/CreateQuotationModal";
+import QuotationDetailModal from "./quotations/QuotationDetailModal";
+
+const STATUS_FILTERS = ["all", "draft", "sent", "approved", "expired"];
 
 export function QuotationsPage() {
+  const { isAdmin, isStaff } = useAuth();
+  const isAdminOrStaff = isAdmin || isStaff;
+
   const [quotations, setQuotations] = useState([]);
+  const [pagination, setPagination] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState("all");
   const [error, setError] = useState(null);
+  const [page, setPage] = useState(1);
+  const [showCreate, setShowCreate] = useState(false);
+  const [selectedQuo, setSelectedQuo] = useState(null);
 
-  useEffect(() => {
-    let isMounted = true;
-    async function fetchQuotes() {
-      try {
-        const params = statusFilter !== "all" ? { status: statusFilter } : {};
-        const res = await subflowService.getQuotations(params);
-        if (isMounted && res.success) {
-          setQuotations(res.data?.items || []);
-        }
-      } catch (err) {
-        if (isMounted) setError(err.message || "Failed to load quotations.");
-      } finally {
-        if (isMounted) setIsLoading(false);
+  const fetchQuotations = useCallback(async () => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const params = { page, per_page: 15 };
+      if (statusFilter !== "all") params.status = statusFilter;
+      const res = await subflowService.getQuotations(params);
+      if (res.success) {
+        setQuotations(res.data?.items || []);
+        setPagination(res.data?.pagination || null);
       }
+    } catch (err) {
+      setError(err.message || "Failed to load quotations.");
+    } finally {
+      setIsLoading(false);
     }
+  }, [statusFilter, page]);
 
-    fetchQuotes();
-    return () => {
-      isMounted = false;
-    };
-  }, [statusFilter]);
+  useEffect(() => { fetchQuotations(); }, [fetchQuotations]);
+  useEffect(() => { setPage(1); }, [statusFilter]);
+
+  // When detail modal refreshes, re-fetch so status updates appear
+  const handleRefresh = useCallback(() => {
+    fetchQuotations();
+    // Re-fetch selected quotation detail
+    if (selectedQuo) {
+      subflowService.getQuotationById(selectedQuo.id)
+        .then((res) => { if (res.success) setSelectedQuo(res.data); })
+        .catch(() => setSelectedQuo(null));
+    }
+  }, [fetchQuotations, selectedQuo]);
+
+  const handleRowClick = async (quo) => {
+    try {
+      const res = await subflowService.getQuotationById(quo.id);
+      setSelectedQuo(res.data || quo);
+    } catch {
+      setSelectedQuo(quo);
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -47,80 +78,116 @@ export function QuotationsPage() {
             Prepare, send, and convert pricing estimates into active subscriptions
           </p>
         </div>
-
-        <div className="flex items-center gap-1 p-1 rounded-xl bg-slate-900 border border-slate-800">
-          {["all", "draft", "sent", "approved", "expired"].map((st) => (
-            <button
-              key={st}
-              onClick={() => setStatusFilter(st)}
-              className={`px-3 py-1.5 rounded-lg text-xs font-medium capitalize transition-all ${
-                statusFilter === st
-                  ? "bg-brand-600 text-white shadow"
-                  : "text-slate-400 hover:text-slate-200"
-              }`}
-            >
-              {st}
-            </button>
-          ))}
+        <div className="flex items-center gap-2">
+          <button onClick={fetchQuotations}
+            className="p-2 rounded-lg border border-slate-700 text-slate-400 hover:text-white hover:border-slate-500 transition"
+            title="Refresh">
+            <RefreshCw className="w-4 h-4" />
+          </button>
+          {isAdminOrStaff && (
+            <Button variant="primary" size="sm" onClick={() => setShowCreate(true)}>
+              <Plus className="w-4 h-4 mr-1.5" /> New Quotation
+            </Button>
+          )}
         </div>
       </div>
 
-      {/* Developer note */}
-      <div className="p-3 rounded-xl bg-slate-900/60 border border-slate-800 text-xs text-slate-400 flex items-center justify-between">
-        <span className="font-mono text-slate-300">
-          <strong className="text-brand-400 font-semibold">Teammate Module:</strong> Quotations API endpoint: <code className="text-slate-200">GET /api/v1/quotations</code>
-        </span>
-        <Badge variant="brand" className="text-[10px]">Ready to Extend</Badge>
+      {/* Status Filters */}
+      <div className="flex flex-wrap items-center gap-1 p-1 rounded-xl bg-slate-900 border border-slate-800 w-fit">
+        {STATUS_FILTERS.map((st) => (
+          <button key={st} onClick={() => setStatusFilter(st)}
+            className={`px-3 py-1.5 rounded-lg text-xs font-medium capitalize transition-all ${
+              statusFilter === st ? "bg-brand-600 text-white shadow" : "text-slate-400 hover:text-slate-200"
+            }`}>
+            {st}
+          </button>
+        ))}
       </div>
 
       {error && <Alert type="error" message={error} onClose={() => setError(null)} />}
 
-      {/* Content */}
       {isLoading ? (
-        <LoadingSpinner message="Loading quotations..." />
+        <LoadingSpinner message="Loading quotations…" />
       ) : quotations.length === 0 ? (
         <EmptyState
-          title="No Quotations in Pipeline"
-          description="Create sales quotations with tailored discount lines to send to prospective clients."
-          developerNote="Model: backend/models/quotation.py | Controller: backend/routes/quotations.py"
+          title="No Quotations Found"
+          description={statusFilter !== "all"
+            ? `No "${statusFilter}" quotations found.`
+            : "Create a quotation to send a pricing proposal to a customer."}
           icon={FileText}
-          actionText="Draft Quotation"
-          onAction={() => alert("Quotations Developer will link the proposal builder modal here!")}
+          actionText={isAdminOrStaff ? "Draft Quotation" : undefined}
+          onAction={isAdminOrStaff ? () => setShowCreate(true) : undefined}
         />
       ) : (
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Quotation #</TableHead>
-              <TableHead>Customer</TableHead>
-              <TableHead>Plan</TableHead>
-              <TableHead>Issue Date</TableHead>
-              <TableHead>Valid Until</TableHead>
-              <TableHead>Total Amount</TableHead>
-              <TableHead>Status</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {quotations.map((q) => (
-              <TableRow key={q.id}>
-                <TableCell className="font-mono text-xs font-semibold text-brand-400">
-                  {q.quotation_number}
-                </TableCell>
-                <TableCell className="font-medium text-white">{q.customer_name || "Client"}</TableCell>
-                <TableCell className="text-xs text-slate-300">{q.plan_name || "Custom Tier"}</TableCell>
-                <TableCell className="text-xs text-slate-400">{formatDate(q.issue_date)}</TableCell>
-                <TableCell className="text-xs text-slate-300">{formatDate(q.valid_until)}</TableCell>
-                <TableCell className="font-semibold text-slate-200">
-                  {formatCurrency(q.total_amount, q.currency)}
-                </TableCell>
-                <TableCell>
-                  <Badge status={q.status}>{q.status}</Badge>
-                </TableCell>
+        <>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Quotation #</TableHead>
+                <TableHead>Customer</TableHead>
+                <TableHead>Plan</TableHead>
+                <TableHead>Issue Date</TableHead>
+                <TableHead>Valid Until</TableHead>
+                <TableHead>Total</TableHead>
+                <TableHead>Status</TableHead>
               </TableRow>
-            ))}
-          </TableBody>
-        </Table>
+            </TableHeader>
+            <TableBody>
+              {quotations.map((q) => {
+                const isExpiring = q.status === "sent" &&
+                  new Date(q.valid_until) <= new Date(Date.now() + 3 * 24 * 60 * 60 * 1000);
+                return (
+                  <TableRow key={q.id} onClick={() => handleRowClick(q)}
+                    className="cursor-pointer hover:bg-slate-800/40 transition">
+                    <TableCell className="font-mono text-xs font-semibold text-brand-400">
+                      {q.quotation_number}
+                    </TableCell>
+                    <TableCell className="font-medium text-white">{q.customer_name || "—"}</TableCell>
+                    <TableCell className="text-xs text-slate-300">{q.plan_name || "Custom"}</TableCell>
+                    <TableCell className="text-xs text-slate-400">{formatDate(q.issue_date)}</TableCell>
+                    <TableCell className={`text-xs font-medium ${isExpiring ? "text-amber-400" : "text-slate-300"}`}>
+                      {formatDate(q.valid_until)}
+                      {isExpiring && <span className="ml-1 text-[10px] text-amber-500">(expiring soon)</span>}
+                    </TableCell>
+                    <TableCell className="font-semibold text-slate-200">
+                      {formatCurrency(q.total_amount, q.currency)}
+                    </TableCell>
+                    <TableCell><Badge status={q.status}>{q.status}</Badge></TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
+
+          {pagination && pagination.total_pages > 1 && (
+            <div className="flex items-center justify-between text-xs text-slate-400 pt-2">
+              <span>Page {pagination.page} of {pagination.total_pages} — {pagination.total_items} total</span>
+              <div className="flex gap-2">
+                <button onClick={() => setPage((p) => p - 1)} disabled={!pagination.has_prev}
+                  className="px-3 py-1.5 rounded-lg border border-slate-700 disabled:opacity-40 hover:border-slate-500 transition">
+                  Previous
+                </button>
+                <button onClick={() => setPage((p) => p + 1)} disabled={!pagination.has_next}
+                  className="px-3 py-1.5 rounded-lg border border-slate-700 disabled:opacity-40 hover:border-slate-500 transition">
+                  Next
+                </button>
+              </div>
+            </div>
+          )}
+        </>
       )}
+
+      <CreateQuotationModal
+        isOpen={showCreate}
+        onClose={() => setShowCreate(false)}
+        onSuccess={() => { setShowCreate(false); fetchQuotations(); }}
+      />
+      <QuotationDetailModal
+        isOpen={!!selectedQuo}
+        onClose={() => setSelectedQuo(null)}
+        quotation={selectedQuo}
+        onRefresh={handleRefresh}
+      />
     </div>
   );
 }
