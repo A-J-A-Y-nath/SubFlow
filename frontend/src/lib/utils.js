@@ -6,7 +6,7 @@ export function cn(...inputs) {
 }
 
 export function formatCurrency(amount, currency = "USD") {
-  const num = typeof amount === "number" ? amount : parseFloat(amount || 0);
+  const num = typeof amount === "number" ? amount : parseFloat(amount || 0) || 0;
   try {
     return new Intl.NumberFormat("en-US", {
       style: "currency",
@@ -15,7 +15,7 @@ export function formatCurrency(amount, currency = "USD") {
       maximumFractionDigits: 2,
     }).format(num);
   } catch {
-    return `$${num.toFixed(2)}`;
+    return `${currency || "USD"} ${num.toFixed(2)}`;
   }
 }
 
@@ -23,14 +23,14 @@ export function formatDate(dateString) {
   if (!dateString) return "—";
   try {
     const date = new Date(dateString);
-    if (isNaN(date.getTime())) return dateString;
+    if (isNaN(date.getTime())) return dateString || "—";
     return new Intl.DateTimeFormat("en-US", {
       year: "numeric",
       month: "short",
       day: "numeric",
     }).format(date);
   } catch {
-    return dateString;
+    return dateString || "—";
   }
 }
 
@@ -46,18 +46,21 @@ export function getStatusColor(status) {
     case "partial":
     case "partially paid":
     case "pending":
-    case "paused":
+    case "trial":
       return "bg-amber-500/15 text-amber-300 border-amber-500/30";
+    case "paused":
+      return "bg-purple-500/15 text-purple-300 border-purple-500/30";
+    case "posted":
+    case "sent":
+    case "issued":
+      return "bg-blue-500/15 text-blue-300 border-blue-500/30";
     case "overdue":
     case "failed":
     case "cancelled":
     case "rejected":
     case "expired":
+    case "inactive":
       return "bg-rose-500/15 text-rose-300 border-rose-500/30";
-    case "posted":
-    case "sent":
-    case "issued":
-      return "bg-blue-500/15 text-blue-300 border-blue-500/30";
     case "draft":
     default:
       return "bg-slate-500/15 text-slate-300 border-slate-500/30";

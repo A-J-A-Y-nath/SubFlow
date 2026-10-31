@@ -106,3 +106,35 @@ def customer_token(client, customer_user):
         "password": customer_user.password
     })
     return res.json["data"]["access_token"]
+
+
+@pytest.fixture
+def staff_user(app):
+    """Create a persistent test Staff user."""
+    with app.app_context():
+        user = User(
+            email="staff.test@subflow.io",
+            first_name="Staff",
+            last_name="Tester",
+            role="staff",
+            is_active=True
+        )
+        user.set_password("SubFlow#Staff2026!")
+        db.session.add(user)
+        db.session.commit()
+        return SimpleNamespace(
+            id=user.id,
+            email="staff.test@subflow.io",
+            password="SubFlow#Staff2026!",
+            role="staff"
+        )
+
+
+@pytest.fixture
+def staff_token(client, staff_user):
+    """Helper that logs in as staff and returns the Bearer access token."""
+    res = client.post("/api/v1/auth/login", json={
+        "email": staff_user.email,
+        "password": staff_user.password
+    })
+    return res.json["data"]["access_token"]

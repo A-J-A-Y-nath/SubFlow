@@ -8,6 +8,41 @@ export const subflowService = {
   async getProductById(id) {
     return api.get(`/products/${id}`);
   },
+  async getProduct(productId) {
+    return api.get(`/products/${productId}`);
+  },
+  async createProduct(data) {
+    return api.post("/products", data);
+  },
+  async updateProduct(productId, data) {
+    return api.put(`/products/${productId}`, data);
+  },
+  async toggleProductStatus(productId, isActive) {
+    return api.patch(`/products/${productId}/status`, { is_active: isActive });
+  },
+  async deleteProduct(productId) {
+    return api.delete(`/products/${productId}`);
+  },
+
+  // Product Variants
+  async getProductVariants(productId, params = {}) {
+    return api.get(`/products/${productId}/variants`, { params });
+  },
+  async getVariant(productId, variantId) {
+    return api.get(`/products/${productId}/variants/${variantId}`);
+  },
+  async createVariant(productId, data) {
+    return api.post(`/products/${productId}/variants`, data);
+  },
+  async updateVariant(productId, variantId, data) {
+    return api.put(`/products/${productId}/variants/${variantId}`, data);
+  },
+  async toggleVariantStatus(productId, variantId, isActive) {
+    return api.patch(`/products/${productId}/variants/${variantId}/status`, { is_active: isActive });
+  },
+  async deleteVariant(productId, variantId) {
+    return api.delete(`/products/${productId}/variants/${variantId}`);
+  },
 
   // ── Plans ─────────────────────────────────────────────────────────────────
   async getPlans(params = {}) {
@@ -15,6 +50,21 @@ export const subflowService = {
   },
   async getPlanById(id) {
     return api.get(`/plans/${id}`);
+  },
+  async getPlan(planId) {
+    return api.get(`/plans/${planId}`);
+  },
+  async createPlan(data) {
+    return api.post("/plans", data);
+  },
+  async updatePlan(planId, data) {
+    return api.put(`/plans/${planId}`, data);
+  },
+  async togglePlanStatus(planId, isActive) {
+    return api.patch(`/plans/${planId}/status`, { is_active: isActive });
+  },
+  async deletePlan(planId) {
+    return api.delete(`/plans/${planId}`);
   },
 
   // ── Subscriptions ─────────────────────────────────────────────────────────
