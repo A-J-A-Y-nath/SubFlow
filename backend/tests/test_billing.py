@@ -120,14 +120,14 @@ def test_billing_cycle_idempotent_no_duplicate(app):
         run_billing_cycle(date.today())
         count_after_first = Invoice.query.filter_by(subscription_id=sub_id).count()
 
-        # The period has advanced — roll back next_billing_date to simulate re-run
-        sub = Subscription.query.get(sub_id)
-        billing_start = sub.current_period_start
+        # The period has advanced — get the period start from the invoice created in the first run
+        first_inv = Invoice.query.filter_by(subscription_id=sub_id).first()
+        billing_start = first_inv.billing_period_start
         # Manually insert a second invoice with the same period_start to prove constraint works
         from sqlalchemy.exc import IntegrityError
         dup = Invoice(
             invoice_number="INV-DUP-TEST",
-            customer_id=sub.customer_id,
+            customer_id=first_inv.customer_id,
             subscription_id=sub_id,
             status="draft",
             invoice_date=date.today(),
