@@ -308,11 +308,11 @@ def expire_stale_quotations() -> int:
 def _audit(actor_id: int, action: str, entity_type: str, entity_id: int, meta: dict = None):
     try:
         db.session.add(AuditLog(
-            actor_id=actor_id,
+            user_id=actor_id,
             action=action,
             entity_type=entity_type,
-            entity_id=entity_id,
-            metadata=meta or {},
+            entity_id=str(entity_id) if entity_id is not None else None,
+            new_values=meta or {},
         ))
     except Exception:
         pass

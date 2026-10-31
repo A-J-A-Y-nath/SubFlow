@@ -12,6 +12,7 @@ import {
   UserPlus,
   Shield,
   Zap,
+  Users,
 } from "lucide-react";
 import { useAuth } from "../../hooks/useAuth";
 import { Badge } from "../ui/Badge";
@@ -21,6 +22,7 @@ export function Sidebar({ currentPath, onNavigate, isMobileOpen, onCloseMobile, 
 
   const navItems = [
     { label: "Dashboard", path: "/dashboard", icon: LayoutDashboard, roles: ["admin", "staff", "customer"] },
+    { label: "Customers", path: "/customers", icon: Users, roles: ["admin", "staff"] },
     { label: "Plans", path: "/plans", icon: Layers, roles: ["admin", "staff", "customer"] },
     { label: "Subscriptions", path: "/subscriptions", icon: Repeat, roles: ["admin", "staff", "customer"] },
     { label: "Invoices", path: "/invoices", icon: Receipt, roles: ["admin", "staff", "customer"] },

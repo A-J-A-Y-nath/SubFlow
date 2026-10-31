@@ -31,8 +31,8 @@ export function CreateInvoiceModal({ isOpen, onClose, onSuccess }) {
       subflowService.getCustomers({ per_page: 100 }).catch(() => ({ data: { items: [] } })),
       subflowService.getProducts({ per_page: 100 }).catch(() => ({ data: { items: [] } })),
     ]).then(([c, p]) => {
-      setCustomers(c.data?.items || []);
-      setProducts(p.data?.items || []);
+      setCustomers(Array.isArray(c?.data) ? c.data : c?.data?.items || []);
+      setProducts(Array.isArray(p?.data) ? p.data : p?.data?.items || []);
     });
   }, [isOpen]);
 
@@ -40,7 +40,10 @@ export function CreateInvoiceModal({ isOpen, onClose, onSuccess }) {
   useEffect(() => {
     if (!form.customer_id) { setSubscriptions([]); return; }
     subflowService.getSubscriptions({ customer_id: form.customer_id, per_page: 50 })
-      .then((res) => setSubscriptions(res.data?.items?.filter((s) => s.status === "active") || []))
+      .then((res) => {
+        const items = Array.isArray(res?.data) ? res.data : res?.data?.items || [];
+        setSubscriptions(items.filter((s) => s.status === "active"));
+      })
       .catch(() => setSubscriptions([]));
   }, [form.customer_id]);
 
@@ -126,7 +129,15 @@ export function CreateInvoiceModal({ isOpen, onClose, onSuccess }) {
             <select className={selectClass} value={form.customer_id}
               onChange={(e) => setForm({ ...form, customer_id: e.target.value, subscription_id: "" })} required>
               <option value="">Select customer…</option>
-              {customers.map((c) => <option key={c.id} value={c.id}>{c.company_name}</option>)}
+              {customers.map((c) => {
+                const label = c.company_name || c.contact_name || c.email || `Customer #${c.id}`;
+                const detail = c.company_name && c.contact_name ? ` (${c.contact_name})` : (c.email && c.email !== label ? ` (${c.email})` : "");
+                return (
+                  <option key={c.id} value={c.id}>
+                    {label}{detail}
+                  </option>
+                );
+              })}
             </select>
           </div>
           <div className="space-y-1.5">

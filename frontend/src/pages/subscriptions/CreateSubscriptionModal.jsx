@@ -22,7 +22,7 @@ export function CreateSubscriptionModal({ isOpen, onClose, onSuccess }) {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
 
-  // Load selects on open
+  // Load selects on modal open
   useEffect(() => {
     if (!isOpen) return;
     Promise.all([
@@ -30,19 +30,81 @@ export function CreateSubscriptionModal({ isOpen, onClose, onSuccess }) {
       subflowService.getCustomers({ per_page: 100 }).catch(() => ({ data: { items: [] } })),
       subflowService.getProducts({ per_page: 100 }).catch(() => ({ data: { items: [] } })),
     ]).then(([plansRes, custsRes, prodsRes]) => {
-      setPlans(plansRes.data?.items || []);
-      setCustomers(custsRes.data?.items || []);
-      setProducts(prodsRes.data?.items || []);
+      const pItems = Array.isArray(plansRes?.data) ? plansRes.data : plansRes?.data?.items || [];
+      const cItems = Array.isArray(custsRes?.data) ? custsRes.data : custsRes?.data?.items || [];
+      const prItems = Array.isArray(prodsRes?.data) ? prodsRes.data : prodsRes?.data?.items || [];
+      setPlans(pItems);
+      setCustomers(cItems);
+      setProducts(prItems);
     });
   }, [isOpen]);
 
-  // Auto-fill unit price from selected product
+  // Selected plan object
+  const selectedPlan = plans.find((p) => String(p.id) === String(form.plan_id));
+
+  // When plan changes, populate base price, description, interval, and auto-renew
+  const handlePlanChange = (selectedPlanId) => {
+    const plan = plans.find((p) => String(p.id) === String(selectedPlanId));
+    setForm((prev) => ({
+      ...prev,
+      plan_id: selectedPlanId,
+      auto_renew: plan && plan.auto_renew !== undefined ? Boolean(plan.auto_renew) : prev.auto_renew,
+    }));
+
+    if (plan) {
+      const planPrice = parseFloat(plan.base_price) || 0;
+      const planDesc = `${plan.name} (${plan.billing_interval || "monthly"})`;
+
+      // Auto-assign first product if line doesn't have one
+      let defaultProdId = "";
+      if (products.length > 0) {
+        const matched =
+          products.find(
+            (pr) =>
+              pr.name?.toLowerCase().includes(plan.name?.toLowerCase()) ||
+              pr.sku?.toLowerCase().includes(plan.code?.toLowerCase())
+          ) || products[0];
+        defaultProdId = String(matched.id);
+      }
+
+      setLines((prev) => {
+        if (prev.length <= 1) {
+          return [
+            {
+              product_id: defaultProdId || prev[0]?.product_id || "",
+              description: planDesc,
+              quantity: plan.min_quantity || 1,
+              unit_price: planPrice,
+              discount_percent: 0,
+            },
+          ];
+        }
+        return prev.map((l, i) =>
+          i === 0
+            ? {
+                ...l,
+                product_id: l.product_id || defaultProdId,
+                description: l.description || planDesc,
+                unit_price: planPrice,
+              }
+            : l
+        );
+      });
+    }
+  };
+
+  // Auto-fill description & price from selected product if line product changes
   const handleLineProductChange = (idx, productId) => {
     const prod = products.find((p) => String(p.id) === String(productId));
     setLines((prev) =>
       prev.map((l, i) =>
         i === idx
-          ? { ...l, product_id: productId, description: prod?.name || l.description, unit_price: prod?.default_price ?? l.unit_price }
+          ? {
+              ...l,
+              product_id: productId,
+              description: prod?.name || l.description,
+              unit_price: prod?.default_price !== undefined ? prod.default_price : l.unit_price,
+            }
           : l
       )
     );
@@ -117,9 +179,15 @@ export function CreateSubscriptionModal({ isOpen, onClose, onSuccess }) {
               required
             >
               <option value="">Select customer…</option>
-              {customers.map((c) => (
-                <option key={c.id} value={c.id}>{c.company_name}</option>
-              ))}
+              {customers.map((c) => {
+                const label = c.company_name || c.contact_name || c.email || `Customer #${c.id}`;
+                const detail = c.company_name && c.contact_name ? ` (${c.contact_name})` : (c.email && c.email !== label ? ` (${c.email})` : "");
+                return (
+                  <option key={c.id} value={c.id}>
+                    {label}{detail}
+                  </option>
+                );
+              })}
             </select>
           </div>
           <div className="space-y-1.5">
@@ -129,16 +197,47 @@ export function CreateSubscriptionModal({ isOpen, onClose, onSuccess }) {
             <select
               className={selectClass}
               value={form.plan_id}
-              onChange={(e) => setForm({ ...form, plan_id: e.target.value })}
+              onChange={(e) => handlePlanChange(e.target.value)}
               required
             >
               <option value="">Select plan…</option>
               {plans.map((p) => (
-                <option key={p.id} value={p.id}>{p.name} ({p.billing_interval})</option>
+                <option key={p.id} value={p.id}>
+                  {p.name} — {p.currency || "USD"} {parseFloat(p.base_price).toFixed(2)} / {p.billing_interval}
+                </option>
               ))}
             </select>
           </div>
         </div>
+
+        {/* Selected Plan Details Card */}
+        {selectedPlan && (
+          <div className="p-3.5 rounded-xl bg-slate-900/80 border border-brand-500/30 flex flex-wrap items-center justify-between gap-3 text-xs">
+            <div>
+              <span className="text-slate-400">Selected Plan: </span>
+              <span className="font-semibold text-white">{selectedPlan.name}</span>
+              <span className="ml-2 font-mono text-[11px] text-brand-400">({selectedPlan.code})</span>
+            </div>
+            <div className="flex items-center gap-4 text-slate-300">
+              <div>
+                <span className="text-slate-400">Interval: </span>
+                <span className="capitalize font-medium text-white">{selectedPlan.billing_interval}</span>
+              </div>
+              <div>
+                <span className="text-slate-400">Base Price: </span>
+                <span className="font-semibold text-emerald-400">
+                  {selectedPlan.currency || "USD"} {parseFloat(selectedPlan.base_price || 0).toFixed(2)}
+                </span>
+              </div>
+              {selectedPlan.trial_days > 0 && (
+                <div>
+                  <span className="text-slate-400">Trial: </span>
+                  <span className="font-medium text-amber-300">{selectedPlan.trial_days} days</span>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* Start Date + Auto-Renew */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -200,9 +299,11 @@ export function CreateSubscriptionModal({ isOpen, onClose, onSuccess }) {
                     onChange={(e) => handleLineProductChange(idx, e.target.value)}
                     required
                   >
-                    <option value="">Select…</option>
+                    <option value="">Select product…</option>
                     {products.map((p) => (
-                      <option key={p.id} value={p.id}>{p.name}</option>
+                      <option key={p.id} value={p.id}>
+                        {p.name} ({p.currency || "USD"} {parseFloat(p.default_price || 0).toFixed(2)})
+                      </option>
                     ))}
                   </select>
                 </div>
@@ -265,7 +366,7 @@ export function CreateSubscriptionModal({ isOpen, onClose, onSuccess }) {
             <div className="flex justify-end items-center gap-3 px-3 py-2.5 bg-slate-800/40 border-t border-slate-700">
               <span className="text-xs text-slate-400">Recurring Total:</span>
               <span className="text-sm font-bold text-white">
-                ₹{recurringTotal.toFixed(2)}
+                {selectedPlan?.currency || "USD"} {recurringTotal.toFixed(2)}
               </span>
             </div>
           </div>

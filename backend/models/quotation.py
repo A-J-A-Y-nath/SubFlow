@@ -50,7 +50,7 @@ class Quotation(db.Model):
             "id": self.id,
             "quotation_number": self.quotation_number,
             "customer_id": self.customer_id,
-            "customer_name": self.customer.company_name if self.customer else None,
+            "customer_name": (self.customer.company_name or self.customer.contact_name or self.customer.email) if self.customer else None,
             "plan_id": self.plan_id,
             "plan_name": self.plan.name if self.plan else None,
             "created_by_id": self.created_by_id,

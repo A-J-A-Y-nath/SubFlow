@@ -197,3 +197,25 @@ def test_renew_subscription(client, app, admin_user, admin_token):
     assert data["status"] == "active"
     # next_billing_date should have advanced
     assert data["next_billing_date"] is not None
+
+
+def test_subscription_customer_and_plan_names_serialized(client, app, admin_user, admin_token):
+    plan_id = _make_plan(app, name="Enterprise Gold")
+    cust_id = _make_customer(app, admin_user.id)
+    prod_id = _make_product(app)
+
+    create_res = client.post("/api/v1/subscriptions", headers=_auth_header(admin_token), json={
+        "plan_id": plan_id, "customer_id": cust_id,
+        "start_date": date.today().isoformat(),
+        "lines": [{"product_id": prod_id, "description": "Gold Seat", "quantity": 1, "unit_price": 99.00}],
+    })
+    assert create_res.status_code == 201
+    data = create_res.json["data"]
+    assert data["customer_name"] == "Test Corp"
+    assert data["plan_name"] == "Enterprise Gold"
+
+    # Also verify GET /subscriptions/:id returns them
+    get_res = client.get(f"/api/v1/subscriptions/{data['id']}", headers=_auth_header(admin_token))
+    assert get_res.status_code == 200
+    assert get_res.json["data"]["customer_name"] == "Test Corp"
+    assert get_res.json["data"]["plan_name"] == "Enterprise Gold"

@@ -273,3 +273,90 @@ def refresh_token():
         data={"access_token": new_access_token, "token_type": "Bearer"},
         message="Access token refreshed"
     )
+
+
+@auth_bp.route("/reset-password", methods=["POST"])
+def reset_password():
+    """
+    Public/Safe password reset endpoint.
+    Accepts email and new_password. Validates password complexity.
+    """
+    data = request.get_json(silent=True) or {}
+    email = (data.get("email") or "").strip().lower()
+    new_password = data.get("new_password") or data.get("password")
+
+    if not email:
+        return api_error(code="MISSING_EMAIL", message="Email address is required", status_code=400)
+    if not new_password:
+        return api_error(code="MISSING_PASSWORD", message="New password is required", status_code=400)
+
+    user = User.query.filter_by(email=email).first()
+    if not user:
+        return api_error(code="USER_NOT_FOUND", message="User with this email not found", status_code=404)
+
+    is_valid_pwd, pwd_errors = validate_password(new_password)
+    if not is_valid_pwd:
+        return api_error(
+            code="INVALID_PASSWORD",
+            message="Password does not meet security requirements",
+            details=pwd_errors,
+            status_code=422
+        )
+
+    user.set_password(new_password)
+    audit = AuditLog(
+        user_id=user.id,
+        action="PASSWORD_RESET",
+        entity_type="User",
+        entity_id=str(user.id),
+        ip_address=request.remote_addr,
+        user_agent=request.user_agent.string if request.user_agent else None
+    )
+    db.session.add(audit)
+    db.session.commit()
+
+    return api_response(message="Password reset successfully. You can now login with your new password.")
+
+
+@auth_bp.route("/change-password", methods=["POST"])
+@role_required(ROLE_ADMIN, ROLE_STAFF, ROLE_CUSTOMER)
+def change_password():
+    """
+    Authenticated password change endpoint.
+    Requires old_password and new_password.
+    """
+    data = request.get_json(silent=True) or {}
+    old_password = data.get("old_password")
+    new_password = data.get("new_password")
+
+    if not old_password or not new_password:
+        return api_error(code="MISSING_FIELDS", message="Both old_password and new_password are required", status_code=400)
+
+    user_id = int(get_jwt_identity())
+    user = db.session.get(User, user_id)
+    if not user or not user.check_password(old_password):
+        return api_error(code="INVALID_OLD_PASSWORD", message="Current password is incorrect", status_code=401)
+
+    is_valid_pwd, pwd_errors = validate_password(new_password)
+    if not is_valid_pwd:
+        return api_error(
+            code="INVALID_PASSWORD",
+            message="Password does not meet security requirements",
+            details=pwd_errors,
+            status_code=422
+        )
+
+    user.set_password(new_password)
+    audit = AuditLog(
+        user_id=user.id,
+        action="PASSWORD_CHANGED",
+        entity_type="User",
+        entity_id=str(user.id),
+        ip_address=request.remote_addr,
+        user_agent=request.user_agent.string if request.user_agent else None
+    )
+    db.session.add(audit)
+    db.session.commit()
+
+    return api_response(message="Password changed successfully")
+

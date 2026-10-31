@@ -32,11 +32,53 @@ export function CreateQuotationModal({ isOpen, onClose, onSuccess }) {
       subflowService.getPlans({ per_page: 100 }).catch(() => ({ data: { items: [] } })),
       subflowService.getProducts({ per_page: 100 }).catch(() => ({ data: { items: [] } })),
     ]).then(([c, p, pr]) => {
-      setCustomers(c.data?.items || []);
-      setPlans(p.data?.items || []);
-      setProducts(pr.data?.items || []);
+      setCustomers(Array.isArray(c?.data) ? c.data : c?.data?.items || []);
+      setPlans(Array.isArray(p?.data) ? p.data : p?.data?.items || []);
+      setProducts(Array.isArray(pr?.data) ? pr.data : pr?.data?.items || []);
     });
   }, [isOpen]);
+
+  const handlePlanChange = (selectedPlanId) => {
+    setForm((prev) => ({ ...prev, plan_id: selectedPlanId }));
+    const plan = plans.find((p) => String(p.id) === String(selectedPlanId));
+    if (plan) {
+      const planPrice = parseFloat(plan.base_price) || 0;
+      const planDesc = `${plan.name} (${plan.billing_interval || "monthly"})`;
+      let defaultProdId = "";
+      if (products.length > 0) {
+        const matched =
+          products.find(
+            (pr) =>
+              pr.name?.toLowerCase().includes(plan.name?.toLowerCase()) ||
+              pr.sku?.toLowerCase().includes(plan.code?.toLowerCase())
+          ) || products[0];
+        defaultProdId = String(matched.id);
+      }
+      setLines((prev) => {
+        if (prev.length <= 1) {
+          return [
+            {
+              product_id: defaultProdId || prev[0]?.product_id || "",
+              description: planDesc,
+              quantity: plan.min_quantity || 1,
+              unit_price: planPrice,
+              discount_percent: 0,
+            },
+          ];
+        }
+        return prev.map((l, i) =>
+          i === 0
+            ? {
+                ...l,
+                product_id: l.product_id || defaultProdId,
+                description: l.description || planDesc,
+                unit_price: planPrice,
+              }
+            : l
+        );
+      });
+    }
+  };
 
   const handleLineProductChange = (idx, productId) => {
     const prod = products.find((p) => String(p.id) === String(productId));
@@ -122,14 +164,26 @@ export function CreateQuotationModal({ isOpen, onClose, onSuccess }) {
             <label className="block text-xs font-semibold uppercase tracking-wider text-slate-300">Customer *</label>
             <select className={selectClass} value={form.customer_id} onChange={(e) => setForm({ ...form, customer_id: e.target.value })} required>
               <option value="">Select customer…</option>
-              {customers.map((c) => <option key={c.id} value={c.id}>{c.company_name}</option>)}
+              {customers.map((c) => {
+                const label = c.company_name || c.contact_name || c.email || `Customer #${c.id}`;
+                const detail = c.company_name && c.contact_name ? ` (${c.contact_name})` : (c.email && c.email !== label ? ` (${c.email})` : "");
+                return (
+                  <option key={c.id} value={c.id}>
+                    {label}{detail}
+                  </option>
+                );
+              })}
             </select>
           </div>
           <div className="space-y-1.5">
             <label className="block text-xs font-semibold uppercase tracking-wider text-slate-300">Plan (optional)</label>
-            <select className={selectClass} value={form.plan_id} onChange={(e) => setForm({ ...form, plan_id: e.target.value })}>
+            <select className={selectClass} value={form.plan_id} onChange={(e) => handlePlanChange(e.target.value)}>
               <option value="">No plan…</option>
-              {plans.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+              {plans.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name} — {p.currency || "USD"} {parseFloat(p.base_price).toFixed(2)} / {p.billing_interval}
+                </option>
+              ))}
             </select>
           </div>
         </div>

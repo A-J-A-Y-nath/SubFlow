@@ -138,3 +138,18 @@ def staff_token(client, staff_user):
         "password": staff_user.password
     })
     return res.json["data"]["access_token"]
+
+
+@pytest.fixture
+def sample_customer(app, customer_user):
+    """Return the customer profile created for customer_user."""
+    with app.app_context():
+        c = db.session.get(Customer, customer_user.customer_id)
+        return SimpleNamespace(
+            id=c.id,
+            user_id=c.user_id,
+            company_name=c.company_name,
+            contact_name=c.contact_name,
+            email=c.email
+        )
+

@@ -12,6 +12,7 @@ import InvoicesPage from "./pages/InvoicesPage";
 import PaymentsPage from "./pages/PaymentsPage";
 import DiscountsPage from "./pages/DiscountsPage";
 import ReportsPage from "./pages/ReportsPage";
+import CustomersPage from "./pages/CustomersPage";
 import LoadingSpinner from "./components/common/LoadingSpinner";
 
 function MainApp() {
@@ -22,7 +23,7 @@ function MainApp() {
   });
 
   // Role-based route guard: Customer cannot access internal management modules
-  const staffOrAdminRoutes = ["/products", "/quotations", "/discounts", "/reports"];
+  const staffOrAdminRoutes = ["/customers", "/products", "/quotations", "/discounts", "/reports"];
 
   // Listen to browser forward/back buttons
   useEffect(() => {
@@ -76,6 +77,7 @@ function MainApp() {
       }
     : {
         "/dashboard": "System Overview",
+        "/customers": "Customer Accounts",
         "/products": "Product Catalog",
         "/plans": "Subscription Plans",
         "/subscriptions": "Active Subscriptions",
@@ -89,6 +91,8 @@ function MainApp() {
   // Render authenticated page with strict customer guards
   const renderPage = () => {
     switch (currentPath) {
+      case "/customers":
+        return isCustomer ? <Dashboard onNavigate={navigate} /> : <CustomersPage onNavigate={navigate} />;
       case "/products":
         return isCustomer ? <Dashboard onNavigate={navigate} /> : <ProductsPage />;
       case "/plans":

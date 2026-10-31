@@ -84,6 +84,14 @@ def create_invoice_from_subscription(
     period_start = subscription.current_period_start
     period_end = subscription.current_period_end
 
+    # Explicit idempotency check: prevent duplicate invoice for same period
+    existing = Invoice.query.filter_by(
+        subscription_id=subscription.id,
+        billing_period_start=period_start
+    ).first()
+    if existing:
+        return existing, None
+
     if not subscription.lines:
         return None, api_error("NO_LINES", "Subscription has no line items to invoice", status_code=422)
 
@@ -315,11 +323,11 @@ def mark_overdue_invoices() -> int:
 def _audit(actor_id: int, action: str, entity_type: str, entity_id: int, meta: dict = None):
     try:
         db.session.add(AuditLog(
-            actor_id=actor_id,
+            user_id=actor_id,
             action=action,
             entity_type=entity_type,
-            entity_id=entity_id,
-            metadata=meta or {},
+            entity_id=str(entity_id) if entity_id is not None else None,
+            new_values=meta or {},
         ))
     except Exception:
         pass

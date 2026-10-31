@@ -66,7 +66,7 @@ class Invoice(db.Model):
             "id": self.id,
             "invoice_number": self.invoice_number,
             "customer_id": self.customer_id,
-            "customer_name": self.customer.company_name if self.customer else None,
+            "customer_name": (self.customer.company_name or self.customer.contact_name or self.customer.email) if self.customer else None,
             "subscription_id": self.subscription_id,
             "subscription_number": self.subscription.subscription_number if self.subscription else None,
             "quotation_id": self.quotation_id,

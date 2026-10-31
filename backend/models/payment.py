@@ -43,7 +43,7 @@ class Payment(db.Model):
             "id": self.id,
             "payment_number": self.payment_number,
             "customer_id": self.customer_id,
-            "customer_name": self.customer.company_name if self.customer else None,
+            "customer_name": (self.customer.company_name or self.customer.contact_name or self.customer.email) if self.customer else None,
             "invoice_id": self.invoice_id,
             "invoice_number": self.invoice.invoice_number if self.invoice else None,
             "amount": float(self.amount) if self.amount is not None else 0.0,

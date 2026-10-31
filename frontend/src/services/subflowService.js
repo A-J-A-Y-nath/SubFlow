@@ -207,6 +207,18 @@ export const subflowService = {
   async getCustomers(params = {}) {
     return api.get("/customers", { params });
   },
+  async getCustomer(customerId) {
+    return api.get(`/customers/${customerId}`);
+  },
+  async createCustomer(data) {
+    return api.post("/customers", data);
+  },
+  async updateCustomer(customerId, data) {
+    return api.put(`/customers/${customerId}`, data);
+  },
+  async deleteCustomer(customerId) {
+    return api.delete(`/customers/${customerId}`);
+  },
 };
 
 export default subflowService;
