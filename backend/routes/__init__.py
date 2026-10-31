@@ -10,6 +10,7 @@ from backend.routes.invoices import invoices_bp
 from backend.routes.payments import payments_bp
 from backend.routes.discounts import discounts_bp
 from backend.routes.reports import reports_bp
+from backend.routes.billing import billing_bp
 
 
 def register_routes(app: Flask):
@@ -27,3 +28,4 @@ def register_routes(app: Flask):
     app.register_blueprint(payments_bp, url_prefix=f"{prefix}/payments")
     app.register_blueprint(discounts_bp, url_prefix=f"{prefix}/discounts")
     app.register_blueprint(reports_bp, url_prefix=f"{prefix}/reports")
+    app.register_blueprint(billing_bp, url_prefix=f"{prefix}/billing")
