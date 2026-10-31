@@ -194,6 +194,25 @@ def create_app(config_name: str | None = None) -> Flask:
         db.session.commit()
         print("[+] Database seeding complete!")
 
+    # CLI Recurring Billing execution command
+    @app.cli.command("recurring-billing")
+    def recurring_billing_cmd():
+        """Execute recurring billing generation for all due subscriptions."""
+        from datetime import date
+        from backend.services.billing_service import BillingService
+
+        today = date.today()
+        print(f"[*] Running recurring billing generation for target date: {today}...")
+        results = BillingService.generate_recurring_invoices(target_date=today)
+        print(f"[+] Total due subscriptions: {results['total_due_subscriptions']}")
+        print(f"[+] Invoices generated: {len(results['generated_invoices'])}")
+        print(f"[-] Skipped: {len(results['skipped'])}")
+        if results["errors"]:
+            print(f"[!] Encountered {len(results['errors'])} errors during processing:")
+            for err in results["errors"]:
+                print(f"    - Sub #{err['subscription_number']}: {err['error']}")
+        print("[*] Recurring billing execution complete.")
+
     return app
 
 
