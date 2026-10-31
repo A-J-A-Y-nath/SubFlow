@@ -1,7 +1,11 @@
+"""
+SubFlow Financial & Billing Services
+"""
 from datetime import date, datetime, timezone, timedelta
 from decimal import Decimal, ROUND_HALF_UP
 from typing import List, Dict, Any, Optional, Tuple
 import calendar
+import logging
 from sqlalchemy import func
 from backend.extensions import db
 from backend.models.invoice import Invoice, InvoiceLine
@@ -11,6 +15,10 @@ from backend.models.plan import Plan
 from backend.models.product import Product
 from backend.models.audit_log import AuditLog
 from backend.services.discount_service import DiscountService, to_decimal
+from backend.services.invoice_service import create_invoice_from_subscription
+from backend.services.subscription_service import _compute_period_end
+
+logger = logging.getLogger(__name__)
 
 TWO_PLACES = Decimal("0.01")
 
@@ -36,12 +44,10 @@ def advance_date_by_interval(start_date: date, interval: str, count: int = 1) ->
 
         year = start_date.year + (start_date.month + months_to_add - 1) // 12
         month = (start_date.month + months_to_add - 1) % 12 + 1
-        # Handle month length mismatch (e.g. Aug 31 -> Sep 30)
         max_day = calendar.monthrange(year, month)[1]
         day = min(start_date.day, max_day)
         return date(year, month, day)
     else:
-        # Default monthly fallback
         year = start_date.year + (start_date.month + count - 1) // 12
         month = (start_date.month + count - 1) % 12 + 1
         max_day = calendar.monthrange(year, month)[1]
@@ -58,7 +64,6 @@ class BillingService:
         current_year = datetime.now(timezone.utc).year
         prefix = f"INV-{current_year}-"
 
-        # Find latest invoice number for current year
         latest = (
             db.session.query(Invoice.invoice_number)
             .filter(Invoice.invoice_number.like(f"{prefix}%"))
@@ -72,11 +77,9 @@ class BillingService:
                 seq_str = latest[0].replace(prefix, "")
                 next_seq = int(seq_str) + 1
             except (ValueError, TypeError):
-                # Fallback to total count + 1
                 next_seq = Invoice.query.count() + 1
 
         invoice_number = f"{prefix}{next_seq:04d}"
-        # Ensure absolute uniqueness in case of gaps
         while Invoice.query.filter_by(invoice_number=invoice_number).first() is not None:
             next_seq += 1
             invoice_number = f"{prefix}{next_seq:04d}"
@@ -110,42 +113,58 @@ class BillingService:
     def calculate_invoice_totals(
         cls,
         lines_data: List[Dict[str, Any]],
-        discount_amount: Decimal = Decimal("0.00"),
-        tax_amount: Decimal = Decimal("0.00")
-    ) -> Dict[str, Decimal]:
+        coupon_code: Optional[str] = None,
+        customer_id: Optional[int] = None,
+        tax_amount: Decimal | float | int = 0.0
+    ) -> Dict[str, Any]:
         """
-        Recalculates all invoice financials from verified line items.
+        Calculates subtotal, discount, tax, and final total for an invoice with Decimal accuracy.
         """
         subtotal = Decimal("0.00")
-        calculated_lines = []
+        processed_lines = []
 
-        for line in lines_data:
+        for idx, line in enumerate(lines_data):
             qty = to_decimal(line.get("quantity", 1))
             price = to_decimal(line.get("unit_price", 0))
             disc_pct = to_decimal(line.get("discount_percent", 0))
-            line_total = cls.calculate_line(qty, price, disc_pct)
+
+            line_subtotal = (qty * price).quantize(TWO_PLACES, rounding=ROUND_HALF_UP)
+            disc_amount = (line_subtotal * (disc_pct / Decimal("100.00"))).quantize(TWO_PLACES, rounding=ROUND_HALF_UP)
+            line_total = (line_subtotal - disc_amount).quantize(TWO_PLACES, rounding=ROUND_HALF_UP)
+
             subtotal += line_total
-            calculated_lines.append({
-                **line,
+            processed_lines.append({
+                "product_id": line.get("product_id"),
+                "description": line.get("description", f"Line item {idx + 1}"),
                 "quantity": qty,
                 "unit_price": price,
                 "discount_percent": disc_pct,
-                "line_total": line_total
+                "amount": line_total
             })
 
-        subtotal = subtotal.quantize(TWO_PLACES, rounding=ROUND_HALF_UP)
-        discount_amount = min(to_decimal(discount_amount).quantize(TWO_PLACES, rounding=ROUND_HALF_UP), subtotal)
-        tax_amount = max(Decimal("0.00"), to_decimal(tax_amount).quantize(TWO_PLACES, rounding=ROUND_HALF_UP))
-        total_amount = max(Decimal("0.00"), (subtotal - discount_amount + tax_amount).quantize(TWO_PLACES, rounding=ROUND_HALF_UP))
+        coupon_discount = Decimal("0.00")
+        applied_coupon = None
+        if coupon_code and coupon_code.strip():
+            validation = DiscountService.validate_coupon(coupon_code, subtotal, customer_id)
+            if validation["valid"]:
+                coupon_discount = to_decimal(validation["discount_amount"])
+                applied_coupon = validation["discount"]
+            else:
+                raise ValueError(f"Invalid coupon: {validation['message']}")
+
+        tax_dec = to_decimal(tax_amount)
+        if tax_dec < Decimal("0.00"):
+            raise ValueError("Tax amount cannot be negative")
+
+        total = max(Decimal("0.00"), subtotal - coupon_discount + tax_dec).quantize(TWO_PLACES, rounding=ROUND_HALF_UP)
 
         return {
             "subtotal": subtotal,
-            "discount_amount": discount_amount,
-            "tax_amount": tax_amount,
-            "total_amount": total_amount,
-            "balance_due": total_amount,
-            "amount_paid": Decimal("0.00"),
-            "lines": calculated_lines
+            "discount_amount": coupon_discount,
+            "tax_amount": tax_dec,
+            "total_amount": total,
+            "lines": processed_lines,
+            "applied_coupon": applied_coupon
         }
 
     @classmethod
@@ -158,141 +177,106 @@ class BillingService:
         subscription_id: Optional[int] = None,
         quotation_id: Optional[int] = None,
         coupon_code: Optional[str] = None,
-        tax_amount: Decimal = Decimal("0.00"),
-        notes: Optional[str] = None,
-        payment_terms: str = "Net 30",
+        tax_amount: Decimal | float | int = 0.0,
         currency: str = "USD",
+        payment_terms: str = "Net 30",
+        notes: Optional[str] = None,
         status: str = "draft",
         user_id: Optional[int] = None
     ) -> Invoice:
-        """
-        Creates and persists a validated invoice with line items.
-        """
-        customer = db.session.get(Customer, customer_id)
+        customer = Customer.query.get(customer_id)
         if not customer:
-            raise ValueError(f"Customer with ID {customer_id} does not exist")
+            raise ValueError(f"Customer with id {customer_id} not found")
 
-        if not lines or len(lines) == 0:
-            raise ValueError("Invoice must contain at least one line item")
+        if due_date < invoice_date:
+            raise ValueError("Due date cannot precede invoice date")
 
-        # Validate line items exist in catalog if product_id is supplied
-        for line in lines:
-            prod_id = line.get("product_id")
-            if prod_id:
-                prod = db.session.get(Product, prod_id)
-                if not prod:
-                    raise ValueError(f"Product ID {prod_id} not found")
-
-        # Pre-calculate subtotal to check coupon qualification
-        raw_subtotal = Decimal("0.00")
-        for line in lines:
-            raw_subtotal += cls.calculate_line(
-                line.get("quantity", 1),
-                line.get("unit_price", 0),
-                line.get("discount_percent", 0)
-            )
-
-        # Coupon validation
-        discount_amount = Decimal("0.00")
-        discount_rule = None
-        if coupon_code:
-            is_valid, disc_val, rule, err_msg = DiscountService.validate_and_calculate_discount(
-                code=coupon_code,
-                eligible_amount=raw_subtotal
-            )
-            if not is_valid:
-                raise ValueError(err_msg or "Invalid coupon code")
-            discount_amount = disc_val
-            discount_rule = rule
+        if not lines:
+            raise ValueError("An invoice must contain at least one line item")
 
         totals = cls.calculate_invoice_totals(
             lines_data=lines,
-            discount_amount=discount_amount,
+            coupon_code=coupon_code,
+            customer_id=customer_id,
             tax_amount=tax_amount
         )
 
-        inv_num = cls.generate_invoice_number()
+        invoice_number = cls.generate_invoice_number()
+
         invoice = Invoice(
-            invoice_number=inv_num,
-            customer_id=customer.id,
+            invoice_number=invoice_number,
+            customer_id=customer_id,
             subscription_id=subscription_id,
             quotation_id=quotation_id,
             status=status,
             invoice_date=invoice_date,
             due_date=due_date,
-            currency=currency or customer.currency or "USD",
             subtotal=totals["subtotal"],
-            discount_amount=totals["discount_amount"],
             tax_amount=totals["tax_amount"],
+            discount_amount=totals["discount_amount"],
             total_amount=totals["total_amount"],
             amount_paid=Decimal("0.00"),
             balance_due=totals["total_amount"],
-            notes=notes,
-            payment_terms=payment_terms or f"Net {customer.payment_terms_days}"
+            currency=currency or customer.currency or "USD",
+            payment_terms=payment_terms,
+            notes=notes
         )
+
+        for line_item in totals["lines"]:
+            inv_line = InvoiceLine(
+                product_id=line_item["product_id"],
+                description=line_item["description"],
+                quantity=line_item["quantity"],
+                unit_price=line_item["unit_price"],
+                discount_percent=line_item["discount_percent"],
+                amount=line_item["amount"]
+            )
+            invoice.lines.append(inv_line)
+
         db.session.add(invoice)
         db.session.flush()
 
-        # Add invoice lines
-        for item in totals["lines"]:
-            inv_line = InvoiceLine(
-                invoice_id=invoice.id,
-                product_id=item.get("product_id"),
-                description=item.get("description", "Subscription line item"),
-                quantity=item["quantity"],
-                unit_price=item["unit_price"],
-                discount_percent=item["discount_percent"],
-                line_total=item["line_total"]
-            )
-            db.session.add(inv_line)
+        if coupon_code and totals.get("applied_coupon"):
+            DiscountService.record_coupon_usage(totals["applied_coupon"]["id"], invoice.id)
 
-        # If coupon was redeemed, record usage count
-        if discount_rule:
-            DiscountService.record_usage(discount_rule.id)
-
-        # Audit log
-        audit = AuditLog(
-            user_id=user_id,
-            action="INVOICE_CREATED",
-            entity_type="Invoice",
-            entity_id=str(invoice.id),
-            new_values={
+        AuditLog.log_event(
+            entity_type="invoice",
+            entity_id=invoice.id,
+            action="created",
+            actor_id=user_id,
+            details={
                 "invoice_number": invoice.invoice_number,
                 "customer_id": invoice.customer_id,
                 "total_amount": float(invoice.total_amount),
                 "status": invoice.status
             }
         )
-        db.session.add(audit)
+
+        db.session.commit()
         return invoice
 
     @classmethod
     def generate_recurring_invoices(
         cls,
         target_date: Optional[date] = None,
+        subscription_id: Optional[int] = None,
         dry_run: bool = False,
         user_id: Optional[int] = None
     ) -> Dict[str, Any]:
-        """
-        Recurring billing engine.
-        Identifies eligible active subscriptions whose next_billing_date <= target_date,
-        generates non-duplicate invoices, advances billing schedules, and commits safely.
-        """
-        if target_date is None:
-            target_date = date.today()
+        if not target_date:
+            target_date = datetime.now(timezone.utc).date()
 
-        # Query eligible subscriptions
-        query = Subscription.query.filter(
-            Subscription.status == "active",
-            Subscription.auto_renew.is_(True),
-            Subscription.next_billing_date <= target_date
-        )
+        query = Subscription.query.filter(Subscription.status == "active")
+
+        if subscription_id:
+            query = query.filter(Subscription.id == subscription_id)
+        else:
+            query = query.filter(Subscription.next_billing_date <= target_date)
 
         subscriptions = query.all()
 
         results = {
             "target_date": target_date.isoformat(),
-            "dry_run": dry_run,
             "total_due_subscriptions": len(subscriptions),
             "generated_invoices": [],
             "skipped": [],
@@ -300,17 +284,22 @@ class BillingService:
         }
 
         for sub in subscriptions:
-            # 1. Trial period exclusion
-            if sub.trial_end and sub.trial_end > target_date:
+            if not sub.next_billing_date:
                 results["skipped"].append({
                     "subscription_id": sub.id,
                     "subscription_number": sub.subscription_number,
-                    "reason": f"Subscription in active trial until {sub.trial_end.isoformat()}"
+                    "reason": "Missing next_billing_date"
                 })
                 continue
 
-            # 2. Duplicate Prevention / Idempotency check:
-            # Check if an uncancelled invoice already exists for this subscription and billing cycle
+            if sub.end_date and sub.next_billing_date > sub.end_date:
+                results["skipped"].append({
+                    "subscription_id": sub.id,
+                    "subscription_number": sub.subscription_number,
+                    "reason": f"Next billing date exceeds subscription end date {sub.end_date.isoformat()}"
+                })
+                continue
+
             existing_inv = Invoice.query.filter(
                 Invoice.subscription_id == sub.id,
                 Invoice.status != "cancelled",
@@ -326,7 +315,6 @@ class BillingService:
                 continue
 
             try:
-                # 3. Assemble Line Items
                 plan = sub.plan
                 lines = []
                 if sub.lines and len(sub.lines) > 0:
@@ -339,7 +327,6 @@ class BillingService:
                             "discount_percent": sl.discount_percent
                         })
                 else:
-                    # Fallback to subscription plan base price
                     lines.append({
                         "product_id": None,
                         "description": f"{plan.name} Recurring Subscription",
@@ -367,7 +354,6 @@ class BillingService:
                     })
                     continue
 
-                # 4. Generate Invoice (Issued / Posted)
                 invoice = cls.create_invoice(
                     customer_id=sub.customer_id,
                     invoice_date=inv_date,
@@ -382,7 +368,6 @@ class BillingService:
                     user_id=user_id
                 )
 
-                # 5. Advance Subscription Billing Period
                 interval = plan.billing_interval if plan else "monthly"
                 interval_count = plan.billing_interval_count if plan else 1
 
@@ -414,3 +399,84 @@ class BillingService:
                 })
 
         return results
+
+
+def get_subscriptions_due_for_billing(as_of_date: date = None) -> list[Subscription]:
+    """
+    Return active subscriptions whose next_billing_date <= as_of_date.
+    """
+    as_of_date = as_of_date or date.today()
+    return (
+        Subscription.query
+        .filter(
+            Subscription.status == "active",
+            Subscription.next_billing_date <= as_of_date,
+        )
+        .all()
+    )
+
+
+def run_billing_cycle(as_of_date: date = None) -> dict:
+    """
+    Process all subscriptions due for billing as of as_of_date.
+    """
+    as_of_date = as_of_date or date.today()
+    due_subs = get_subscriptions_due_for_billing(as_of_date)
+
+    processed = 0
+    invoices_created = 0
+    already_billed = 0
+    errors = []
+
+    for sub in due_subs:
+        processed += 1
+        try:
+            invoice, err = create_invoice_from_subscription(sub, as_of_date)
+
+            if err:
+                errors.append({
+                    "subscription_id": sub.id,
+                    "subscription_number": sub.subscription_number,
+                    "error": str(err),
+                })
+                continue
+
+            if invoice and invoice.subscription_id == sub.id:
+                existing_for_period = sum(
+                    1 for inv in sub.invoices
+                    if inv.billing_period_start == sub.current_period_start
+                )
+                if existing_for_period > 1:
+                    already_billed += 1
+                else:
+                    invoices_created += 1
+
+            plan = sub.plan
+            new_start = sub.current_period_end
+            new_end = _compute_period_end(
+                new_start, plan.billing_interval, plan.billing_interval_count
+            )
+            sub.current_period_start = new_start
+            sub.current_period_end = new_end
+            sub.next_billing_date = new_end
+            db.session.commit()
+
+        except Exception as exc:
+            db.session.rollback()
+            logger.exception(
+                "Billing cycle error for subscription %s: %s",
+                sub.subscription_number, exc
+            )
+            errors.append({
+                "subscription_id": sub.id,
+                "subscription_number": sub.subscription_number,
+                "error": str(exc),
+            })
+
+    return {
+        "as_of_date": as_of_date.isoformat(),
+        "processed": processed,
+        "invoices_created": invoices_created,
+        "already_billed": already_billed,
+        "errors": errors,
+    }

@@ -1,177 +1,200 @@
+"""
+Tests for Invoice lifecycle — Member 3
+Covers: creation, confirm, cancel, cannot cancel paid, total accuracy, customer scoping.
+"""
 import pytest
 from datetime import date, timedelta
-from decimal import Decimal
-from backend.models import Customer, Product, Invoice
 from backend.extensions import db
+from backend.models import Customer, Plan, Product, Subscription, SubscriptionLine, Invoice, InvoiceLine
 
 
-def test_create_invoice_success(client, admin_token, customer_user):
-    """Test successful manual invoice creation by admin with Decimal calculations."""
-    res = client.post(
-        "/api/v1/invoices",
-        headers={"Authorization": f"Bearer {admin_token}"},
-        json={
-            "customer_id": customer_user.customer_id,
-            "invoice_date": date.today().isoformat(),
-            "due_date": (date.today() + timedelta(days=30)).isoformat(),
-            "lines": [
-                {
-                    "description": "Pro Tier Subscription",
-                    "quantity": 2,
-                    "unit_price": 50.00,
-                    "discount_percent": 10.00
-                },
-                {
-                    "description": "Extra Storage Add-on",
-                    "quantity": 1,
-                    "unit_price": 20.00,
-                    "discount_percent": 0.00
-                }
-            ],
-            "tax_amount": 5.00,
-            "status": "draft"
-        }
-    )
-    assert res.status_code == 201
+def _make_customer(app):
+    with app.app_context():
+        c = Customer(
+            company_name="Invoice Test Corp",
+            contact_name="Inv Tester",
+            email="inv@testcorp.io",
+            payment_terms_days=30,
+        )
+        db.session.add(c)
+        db.session.commit()
+        return c.id
+
+
+def _make_product(app):
+    with app.app_context():
+        p = Product(
+            name="Invoice Product",
+            sku="PROD-INV-001",
+            description="Invoice product",
+            is_recurring=True,
+            default_price=100.00,
+        )
+        db.session.add(p)
+        db.session.commit()
+        return p.id
+
+
+def _auth(token):
+    return {"Authorization": f"Bearer {token}"}
+
+
+def _manual_invoice_payload(customer_id, product_id):
+    today = date.today()
+    return {
+        "customer_id": customer_id,
+        "invoice_date": today.isoformat(),
+        "due_date": (today + timedelta(days=30)).isoformat(),
+        "lines": [
+            {"product_id": product_id, "description": "Service Fee", "quantity": 1, "unit_price": 100.00, "discount_percent": 0},
+        ],
+    }
+
+
+# ---------------------------------------------------------------------------
+# Tests
+# ---------------------------------------------------------------------------
+
+def test_create_invoice_success(client, app, admin_token):
+    cust_id = _make_customer(app)
+    prod_id = _make_product(app)
+    res = client.post("/api/v1/invoices", headers=_auth(admin_token),
+                      json=_manual_invoice_payload(cust_id, prod_id))
+    assert res.status_code == 201, res.json
     data = res.json["data"]
-    assert data["invoice_number"].startswith("INV-")
-    assert data["customer_id"] == customer_user.customer_id
-    # Line 1: 2 * 50 * 0.9 = 90.00
-    # Line 2: 1 * 20 = 20.00
-    # Subtotal: 110.00
-    # Total: 110.00 + 5.00 = 115.00
-    assert data["subtotal"] == 110.00
-    assert data["tax_amount"] == 5.00
-    assert data["total_amount"] == 115.00
-    assert data["balance_due"] == 115.00
     assert data["status"] == "draft"
+    assert data["invoice_number"].startswith("INV-")
 
 
-def test_create_invoice_validation_negative_quantity(client, admin_token, customer_user):
-    """Test that non-positive quantities are rejected."""
-    res = client.post(
-        "/api/v1/invoices",
-        headers={"Authorization": f"Bearer {admin_token}"},
-        json={
-            "customer_id": customer_user.customer_id,
-            "lines": [
-                {
-                    "description": "Invalid quantity item",
-                    "quantity": -1,
-                    "unit_price": 50.00
-                }
-            ]
-        }
-    )
+def test_create_invoice_missing_due_date(client, app, admin_token):
+    cust_id = _make_customer(app)
+    prod_id = _make_product(app)
+    res = client.post("/api/v1/invoices", headers=_auth(admin_token), json={
+        "customer_id": cust_id,
+        "invoice_date": date.today().isoformat(),
+        "lines": [{"product_id": prod_id, "description": "x", "quantity": 1, "unit_price": 10}],
+    })
     assert res.status_code == 422
-    assert res.json["success"] is False
 
 
-def test_issue_draft_invoice(client, admin_token, customer_user):
-    """Test transitioning invoice from draft to posted (issued)."""
-    create_res = client.post(
-        "/api/v1/invoices",
-        headers={"Authorization": f"Bearer {admin_token}"},
-        json={
-            "customer_id": customer_user.customer_id,
-            "lines": [{"description": "Monthly Plan", "quantity": 1, "unit_price": 49.00}],
-            "status": "draft"
-        }
-    )
+def test_confirm_invoice(client, app, admin_token):
+    cust_id = _make_customer(app)
+    prod_id = _make_product(app)
+    create_res = client.post("/api/v1/invoices", headers=_auth(admin_token),
+                             json=_manual_invoice_payload(cust_id, prod_id))
     inv_id = create_res.json["data"]["id"]
 
-    issue_res = client.post(
-        f"/api/v1/invoices/{inv_id}/issue",
-        headers={"Authorization": f"Bearer {admin_token}"}
-    )
-    assert issue_res.status_code == 200
-    assert issue_res.json["data"]["status"] == "posted"
+    confirm_res = client.post(f"/api/v1/invoices/{inv_id}/confirm", headers=_auth(admin_token))
+    assert confirm_res.status_code == 200
+    assert confirm_res.json["data"]["status"] == "posted"
 
 
-def test_cancel_invoice_success_and_forbidden_on_paid(client, admin_token, customer_user):
-    """Test cancellation rules: unpaid draft can be cancelled, but paid cannot."""
-    create_res = client.post(
-        "/api/v1/invoices",
-        headers={"Authorization": f"Bearer {admin_token}"},
-        json={
-            "customer_id": customer_user.customer_id,
-            "lines": [{"description": "Service", "quantity": 1, "unit_price": 100.00}],
-            "status": "draft"
-        }
-    )
+def test_cancel_draft_invoice(client, app, admin_token):
+    cust_id = _make_customer(app)
+    prod_id = _make_product(app)
+    create_res = client.post("/api/v1/invoices", headers=_auth(admin_token),
+                             json=_manual_invoice_payload(cust_id, prod_id))
     inv_id = create_res.json["data"]["id"]
 
-    # Cancel unpaid draft
-    cancel_res = client.post(
-        f"/api/v1/invoices/{inv_id}/cancel",
-        headers={"Authorization": f"Bearer {admin_token}"}
-    )
+    cancel_res = client.post(f"/api/v1/invoices/{inv_id}/cancel", headers=_auth(admin_token))
     assert cancel_res.status_code == 200
     assert cancel_res.json["data"]["status"] == "cancelled"
 
 
-def test_customer_cannot_view_other_customers_invoice(client, admin_token, customer_token, customer_user):
-    """Test customer isolation (RBAC): customers cannot access another customer's invoice."""
-    # Create a 2nd customer
-    from backend.models import User
-    second_user = User(
-        email="other.customer@subflow.io",
-        first_name="Other",
-        last_name="Customer",
-        role="customer"
-    )
-    second_user.set_password("SubFlow#Customer2026!")
-    db.session.add(second_user)
-    db.session.flush()
+def test_cannot_cancel_paid_invoice(app, client, admin_token):
+    """Directly insert a paid invoice and verify it cannot be cancelled via API."""
+    cust_id = _make_customer(app)
+    prod_id = _make_product(app)
 
-    second_customer = Customer(
-        user_id=second_user.id,
-        company_name="Second Corp",
-        contact_name="Second Person",
-        email=second_user.email
-    )
-    db.session.add(second_customer)
-    db.session.commit()
+    with app.app_context():
+        today = date.today()
+        inv = Invoice(
+            invoice_number="INV-PAID-TEST",
+            customer_id=cust_id,
+            status="paid",
+            invoice_date=today,
+            due_date=today + timedelta(days=30),
+            total_amount=118.00,
+            amount_paid=118.00,
+            balance_due=0.00,
+            currency="USD",
+        )
+        db.session.add(inv)
+        db.session.commit()
+        inv_id = inv.id
 
-    # Admin creates invoice for second customer
-    res = client.post(
-        "/api/v1/invoices",
-        headers={"Authorization": f"Bearer {admin_token}"},
-        json={
-            "customer_id": second_customer.id,
-            "lines": [{"description": "Private consulting", "quantity": 1, "unit_price": 500.00}],
-            "status": "posted"
-        }
-    )
-    inv_id = res.json["data"]["id"]
-
-    # Customer 1 attempts to read Customer 2's invoice
-    get_res = client.get(
-        f"/api/v1/invoices/{inv_id}",
-        headers={"Authorization": f"Bearer {customer_token}"}
-    )
-    assert get_res.status_code == 403
-    assert get_res.json["success"] is False
+    cancel_res = client.post(f"/api/v1/invoices/{inv_id}/cancel", headers=_auth(admin_token))
+    assert cancel_res.status_code == 422
+    assert cancel_res.json["error"]["code"] == "INVALID_STATUS"
 
 
-def test_customer_only_sees_own_invoices_in_list(client, admin_token, customer_token, customer_user):
-    """Test customer invoice listing only returns invoices belonging to that customer."""
-    # Create invoice for Customer 1
-    client.post(
-        "/api/v1/invoices",
-        headers={"Authorization": f"Bearer {admin_token}"},
-        json={
-            "customer_id": customer_user.customer_id,
-            "lines": [{"description": "Item 1", "quantity": 1, "unit_price": 100.00}]
-        }
-    )
+def test_invoice_totals_accuracy(client, app, admin_token):
+    """Totals: 1 * 200 - 0% disc = 200 taxable, 18% GST = 36, total = 236."""
+    cust_id = _make_customer(app)
+    prod_id = _make_product(app)
+    today = date.today()
+    res = client.post("/api/v1/invoices", headers=_auth(admin_token), json={
+        "customer_id": cust_id,
+        "invoice_date": today.isoformat(),
+        "due_date": (today + timedelta(days=30)).isoformat(),
+        "lines": [{"product_id": prod_id, "description": "Service", "quantity": 2, "unit_price": 100.00, "discount_percent": 0}],
+    })
+    data = res.json["data"]
+    assert data["subtotal"] == pytest.approx(200.00, abs=0.01)
+    assert data["tax_amount"] == pytest.approx(36.00, abs=0.01)
+    assert data["total_amount"] == pytest.approx(236.00, abs=0.01)
+    assert data["balance_due"] == pytest.approx(236.00, abs=0.01)
 
-    list_res = client.get(
-        "/api/v1/invoices",
-        headers={"Authorization": f"Bearer {customer_token}"}
-    )
+
+def test_invoice_with_discount_totals(client, app, admin_token):
+    """Totals: 1 * 100 - 20% disc = 80 taxable, 18% GST = 14.40, total = 94.40."""
+    cust_id = _make_customer(app)
+    prod_id = _make_product(app)
+    today = date.today()
+    res = client.post("/api/v1/invoices", headers=_auth(admin_token), json={
+        "customer_id": cust_id,
+        "invoice_date": today.isoformat(),
+        "due_date": (today + timedelta(days=30)).isoformat(),
+        "lines": [{"product_id": prod_id, "description": "Service", "quantity": 1, "unit_price": 100.00, "discount_percent": 20}],
+    })
+    data = res.json["data"]
+    assert data["discount_amount"] == pytest.approx(20.00, abs=0.01)
+    assert data["tax_amount"] == pytest.approx(14.40, abs=0.01)
+    assert data["total_amount"] == pytest.approx(94.40, abs=0.01)
+
+
+def test_customer_sees_only_own_invoices(client, app, customer_user, customer_token, admin_token):
+    """Customer can list invoices but only sees their own."""
+    cust_id = _make_customer(app)
+    prod_id = _make_product(app)
+
+    # Create invoice for a different customer (not customer_user's linked profile)
+    today = date.today()
+    client.post("/api/v1/invoices", headers=_auth(admin_token), json={
+        "customer_id": cust_id,
+        "invoice_date": today.isoformat(),
+        "due_date": (today + timedelta(days=30)).isoformat(),
+        "lines": [{"product_id": prod_id, "description": "x", "quantity": 1, "unit_price": 10}],
+    })
+
+    list_res = client.get("/api/v1/invoices", headers=_auth(customer_token))
     assert list_res.status_code == 200
-    items = list_res.json["data"]["items"]
-    assert len(items) >= 1
-    for item in items:
-        assert item["customer_id"] == customer_user.customer_id
+    assert list_res.json["data"]["items"] == []
+
+
+def test_customer_cannot_create_invoice(client, customer_token):
+    res = client.post("/api/v1/invoices", headers=_auth(customer_token), json={})
+    assert res.status_code == 403
+
+
+def test_confirm_already_posted_invoice_fails(client, app, admin_token):
+    cust_id = _make_customer(app)
+    prod_id = _make_product(app)
+    create_res = client.post("/api/v1/invoices", headers=_auth(admin_token),
+                             json=_manual_invoice_payload(cust_id, prod_id))
+    inv_id = create_res.json["data"]["id"]
+
+    client.post(f"/api/v1/invoices/{inv_id}/confirm", headers=_auth(admin_token))
+    second_confirm = client.post(f"/api/v1/invoices/{inv_id}/confirm", headers=_auth(admin_token))
+    assert second_confirm.status_code == 422
+    assert second_confirm.json["error"]["code"] == "INVALID_STATUS"

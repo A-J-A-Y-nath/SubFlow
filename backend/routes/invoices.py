@@ -1,3 +1,8 @@
+"""
+Invoices Routes — SubFlow
+Full lifecycle: list, create, detail, issue/confirm, cancel, recurring billing, and receivables analytics.
+Customers see only their own invoices.
+"""
 from datetime import datetime, date, timezone, timedelta
 from decimal import Decimal
 from flask import Blueprint, request, g
@@ -9,6 +14,10 @@ from backend.models.subscription import Subscription
 from backend.models.audit_log import AuditLog
 from backend.services.billing_service import BillingService
 from backend.services.analytics_service import AnalyticsService
+try:
+    from backend.services.invoice_service import mark_overdue_invoices
+except ImportError:
+    mark_overdue_invoices = None
 from backend.utils.response import api_response, api_error
 from backend.utils.pagination import paginate_query, get_pagination_params
 from backend.utils.decorators import role_required, ROLE_ADMIN, ROLE_STAFF, ROLE_CUSTOMER
@@ -16,46 +25,46 @@ from backend.utils.decorators import role_required, ROLE_ADMIN, ROLE_STAFF, ROLE
 invoices_bp = Blueprint("invoices", __name__, url_prefix="/invoices")
 
 
-def _get_customer_id_for_current_user() -> int | None:
-    """Helper to retrieve the authenticated customer's customer_id safely."""
-    if not hasattr(g, "current_user") or not g.current_user:
+def _customer_id_for_user(user) -> int | None:
+    if not user:
         return None
-    if g.current_user.role == ROLE_CUSTOMER:
-        return g.current_user.customer_profile.id if g.current_user.customer_profile else -1
+    if user.role == ROLE_CUSTOMER:
+        if hasattr(user, "customer_profile") and user.customer_profile:
+            return user.customer_profile.id
+        linked = Customer.query.filter_by(user_id=user.id).first()
+        return linked.id if linked else -1
     return None
+
+
+def _get_customer_id_for_current_user() -> int | None:
+    return _customer_id_for_user(getattr(g, "current_user", None))
 
 
 @invoices_bp.route("", methods=["GET"])
 @role_required(ROLE_ADMIN, ROLE_STAFF, ROLE_CUSTOMER)
 def list_invoices():
-    """
-    List invoices with filtering by status, customer, subscription, search, and date.
-    Enforces customer isolation (customers only see their own invoices).
-    """
     page, per_page = get_pagination_params()
     query = Invoice.query
 
-    # Enforce customer data isolation
-    customer_id_override = _get_customer_id_for_current_user()
-    if customer_id_override is not None:
-        query = query.filter_by(customer_id=customer_id_override)
+    user = g.current_user
+    if user.role == ROLE_CUSTOMER:
+        cid = _customer_id_for_user(user)
+        if cid is None or cid == -1:
+            return api_response(data={"items": [], "total": 0, "page": page, "per_page": per_page, "pages": 0}, message="No customer profile linked")
+        query = query.filter_by(customer_id=cid)
     else:
-        # Staff/Admin can filter by customer_id
         customer_id_param = request.args.get("customer_id", type=int)
         if customer_id_param:
             query = query.filter_by(customer_id=customer_id_param)
 
-    # Status filter
     status = request.args.get("status")
     if status and status.lower() != "all":
         query = query.filter_by(status=status.lower())
 
-    # Subscription filter
     subscription_id = request.args.get("subscription_id", type=int)
     if subscription_id:
         query = query.filter_by(subscription_id=subscription_id)
 
-    # Overdue filter
     is_overdue = request.args.get("is_overdue")
     if is_overdue and is_overdue.lower() in ("true", "1"):
         today = date.today()
@@ -66,7 +75,6 @@ def list_invoices():
             )
         )
 
-    # Search filter (invoice_number or customer name)
     search = request.args.get("search", "").strip()
     if search:
         search_pattern = f"%{search}%"
@@ -85,7 +93,6 @@ def list_invoices():
 @invoices_bp.route("/customers", methods=["GET"])
 @role_required(ROLE_ADMIN, ROLE_STAFF)
 def get_invoicing_customers():
-    """List customers for invoice selection dropdown."""
     customers = Customer.query.filter_by(is_active=True).order_by(Customer.company_name.asc()).all()
     return api_response(data=[c.to_dict() for c in customers], message="Customers retrieved")
 
@@ -93,7 +100,6 @@ def get_invoicing_customers():
 @invoices_bp.route("/active-subscriptions", methods=["GET"])
 @role_required(ROLE_ADMIN, ROLE_STAFF)
 def get_invoicing_subscriptions():
-    """List active subscriptions for quick invoice generation."""
     customer_id = request.args.get("customer_id", type=int)
     query = Subscription.query.filter_by(status="active")
     if customer_id:
@@ -105,24 +111,15 @@ def get_invoicing_subscriptions():
 @invoices_bp.route("/<int:invoice_id>", methods=["GET"])
 @role_required(ROLE_ADMIN, ROLE_STAFF, ROLE_CUSTOMER)
 def get_invoice(invoice_id: int):
-    """
-    Retrieve detailed invoice view with line items and allocations.
-    Protects customer data against unauthorized cross-tenant access.
-    """
     invoice = Invoice.query.get_or_404(invoice_id)
+    user = g.current_user
+    if user.role == ROLE_CUSTOMER:
+        cid = _customer_id_for_user(user)
+        if invoice.customer_id != cid:
+            return api_error("FORBIDDEN", "Access denied to this invoice", status_code=403)
 
-    # RBAC Customer isolation
-    cust_id = _get_customer_id_for_current_user()
-    if cust_id is not None and invoice.customer_id != cust_id:
-        return api_error(
-            code="FORBIDDEN",
-            message="You are not authorized to view this invoice",
-            status_code=403
-        )
-
-    invoice_data = invoice.to_dict()
-    # Add detailed allocations list
-    invoice_data["allocations"] = [
+    data = invoice.to_dict()
+    allocations_list = [
         {
             "id": a.id,
             "payment_id": a.payment_id,
@@ -130,22 +127,20 @@ def get_invoice(invoice_id: int):
             "payment_date": a.payment.payment_date.isoformat() if a.payment and a.payment.payment_date else None,
             "payment_method": a.payment.payment_method if a.payment else None,
             "amount_allocated": float(a.amount_allocated),
+            "allocated_amount": float(a.amount_allocated),
             "created_at": a.created_at.isoformat() if a.created_at else None
         }
         for a in invoice.payment_allocations
     ]
-    return api_response(data=invoice_data, message="Invoice details retrieved")
+    data["allocations"] = allocations_list
+    data["payment_allocations"] = allocations_list
+    return api_response(data=data, message="Invoice details retrieved")
 
 
 @invoices_bp.route("", methods=["POST"])
 @role_required(ROLE_ADMIN, ROLE_STAFF)
 def create_invoice():
-    """
-    Manual invoice creation endpoint for staff and administrators.
-    Recalculates all monetary figures on the backend.
-    """
     data = request.get_json(silent=True) or {}
-
     customer_id = data.get("customer_id")
     if not customer_id:
         return api_error(code="VALIDATION_ERROR", message="Customer ID is required", status_code=422)
@@ -154,7 +149,6 @@ def create_invoice():
     if not lines or not isinstance(lines, list) or len(lines) == 0:
         return api_error(code="VALIDATION_ERROR", message="At least one invoice line item is required", status_code=422)
 
-    # Dates
     try:
         inv_date = date.fromisoformat(data["invoice_date"]) if data.get("invoice_date") else date.today()
     except (ValueError, TypeError):
@@ -197,11 +191,9 @@ def create_invoice():
 
 
 @invoices_bp.route("/<int:invoice_id>/issue", methods=["POST"])
+@invoices_bp.route("/<int:invoice_id>/confirm", methods=["POST"])
 @role_required(ROLE_ADMIN, ROLE_STAFF)
 def issue_invoice(invoice_id: int):
-    """
-    Transition invoice from draft to posted (issued).
-    """
     invoice = Invoice.query.get_or_404(invoice_id)
     if invoice.status != "draft":
         return api_error(
@@ -227,10 +219,6 @@ def issue_invoice(invoice_id: int):
 @invoices_bp.route("/<int:invoice_id>/cancel", methods=["POST"])
 @role_required(ROLE_ADMIN, ROLE_STAFF)
 def cancel_invoice(invoice_id: int):
-    """
-    Cancel an unpaid draft or posted invoice.
-    Invoices with recorded payments cannot be cancelled.
-    """
     invoice = Invoice.query.get_or_404(invoice_id)
     if invoice.status == "cancelled":
         return api_error(code="ALREADY_CANCELLED", message="Invoice is already cancelled", status_code=400)
@@ -260,9 +248,6 @@ def cancel_invoice(invoice_id: int):
 @invoices_bp.route("/from-subscription/<int:subscription_id>", methods=["POST"])
 @role_required(ROLE_ADMIN, ROLE_STAFF)
 def generate_from_subscription(subscription_id: int):
-    """
-    Generates an invoice directly from an active subscription record.
-    """
     sub = db.session.get(Subscription, subscription_id)
     if not sub:
         return api_error(code="NOT_FOUND", message="Subscription not found", status_code=404)
@@ -321,9 +306,6 @@ def generate_from_subscription(subscription_id: int):
 @invoices_bp.route("/recurring-billing/run", methods=["POST"])
 @role_required(ROLE_ADMIN, ROLE_STAFF)
 def run_recurring_billing():
-    """
-    Executes the automated recurring billing engine to process all subscriptions due.
-    """
     data = request.get_json(silent=True) or {}
     target_date_str = data.get("target_date")
     target_date = date.fromisoformat(target_date_str) if target_date_str else date.today()
@@ -340,9 +322,6 @@ def run_recurring_billing():
 @invoices_bp.route("/recurring-billing/preview", methods=["GET"])
 @role_required(ROLE_ADMIN, ROLE_STAFF)
 def preview_recurring_billing():
-    """
-    Preview eligible subscriptions that would be invoiced by the recurring billing engine.
-    """
     target_date_str = request.args.get("target_date")
     target_date = date.fromisoformat(target_date_str) if target_date_str else date.today()
 
@@ -357,9 +336,6 @@ def preview_recurring_billing():
 @invoices_bp.route("/receivables/summary", methods=["GET"])
 @role_required(ROLE_ADMIN, ROLE_STAFF, ROLE_CUSTOMER)
 def get_receivables_summary():
-    """
-    Returns summary statistics for receivables, aging buckets, and overdue totals.
-    """
     customer_id = _get_customer_id_for_current_user()
     summary = AnalyticsService.get_financial_summary(customer_id=customer_id)
     aging = AnalyticsService.get_aging_report(customer_id=customer_id)
@@ -367,3 +343,22 @@ def get_receivables_summary():
         data={"summary": summary, "aging": aging},
         message="Receivables summary loaded successfully"
     )
+
+
+@invoices_bp.route("/mark-overdue", methods=["POST"])
+@role_required(ROLE_ADMIN)
+def mark_overdue_route():
+    if mark_overdue_invoices:
+        count = mark_overdue_invoices()
+    else:
+        today = date.today()
+        overdue_invs = Invoice.query.filter(
+            Invoice.status.in_(["posted", "partial"]),
+            Invoice.due_date < today,
+            Invoice.balance_due > 0
+        ).all()
+        for inv in overdue_invs:
+            inv.status = "overdue"
+        db.session.commit()
+        count = len(overdue_invs)
+    return api_response(data={"marked_overdue": count}, message=f"{count} invoices marked overdue")

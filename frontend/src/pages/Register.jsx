@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { User, Mail, Lock, Building, Check, X, ArrowRight, ShieldCheck, Zap } from "lucide-react";
+import { User, Mail, Lock, Building, Check, X, ArrowRight, ShieldCheck, Zap, Eye, EyeOff } from "lucide-react";
 import { useAuth } from "../hooks/useAuth";
 import Input from "../components/ui/Input";
 import Button from "../components/ui/Button";
@@ -14,6 +14,7 @@ export function Register({ onNavigate }) {
     email: "",
     password: "",
   });
+  const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
 
@@ -123,12 +124,27 @@ export function Register({ onNavigate }) {
             <div className="space-y-2">
               <Input
                 label="Password"
-                type="password"
+                type={showPassword ? "text" : "password"}
                 placeholder="••••••••••••"
                 icon={Lock}
                 value={formData.password}
                 onChange={(e) => setFormData({ ...formData, password: e.target.value })}
                 required
+                rightElement={
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="text-slate-400 hover:text-slate-200 transition focus:outline-none p-1 rounded"
+                    title={showPassword ? "Hide password" : "Show password"}
+                    aria-label={showPassword ? "Hide password" : "Show password"}
+                  >
+                    {showPassword ? (
+                      <EyeOff className="w-4 h-4 text-slate-400 hover:text-slate-200" />
+                    ) : (
+                      <Eye className="w-4 h-4 text-slate-400 hover:text-slate-200" />
+                    )}
+                  </button>
+                }
               />
 
               {/* Password checklist */}
