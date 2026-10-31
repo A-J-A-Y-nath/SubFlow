@@ -43,10 +43,14 @@ class DiscountRule(db.Model):
         if not self.is_active:
             return False
         now = datetime.now(timezone.utc)
-        if self.valid_from and now < self.valid_from:
-            return False
-        if self.valid_to and now > self.valid_to:
-            return False
+        if self.valid_from:
+            vf = self.valid_from if self.valid_from.tzinfo else self.valid_from.replace(tzinfo=timezone.utc)
+            if now < vf:
+                return False
+        if self.valid_to:
+            vt = self.valid_to if self.valid_to.tzinfo else self.valid_to.replace(tzinfo=timezone.utc)
+            if now > vt:
+                return False
         if self.max_uses is not None and self.current_uses >= self.max_uses:
             return False
         return True
